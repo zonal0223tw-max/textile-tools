@@ -91,10 +91,10 @@ window.addEventListener('storage',function(e){if(e.key==='tex_theme')location.re
   input[type=file]{display:none}
 
   /* 浮層提示 */
-  .hint{position:absolute;top:12px;left:50%;transform:translateX(-50%);
+  .hint{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);
     background:rgba(20,17,13,.84);color:#fff;font:600 12.5px/1.4 var(--sans);
-    padding:9px 15px;border-radius:22px;backdrop-filter:blur(6px);max-width:88%;text-align:center;
-    pointer-events:none;transition:.2s;white-space:nowrap}
+    padding:9px 15px;border-radius:22px;backdrop-filter:blur(6px);max-width:92%;text-align:center;
+    pointer-events:none;transition:.2s}
   .hint b{color:#ffce8a}
 
   /* 信心晶片 */
@@ -107,7 +107,7 @@ window.addEventListener('storage',function(e){if(e.key==='tex_theme')location.re
   /* ── 底部面板 ── */
   .dock{flex:none;background:var(--panel);border-top:1px solid var(--line);
     max-height:42vh;overflow-y:auto;-webkit-overflow-scrolling:touch}
-  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px 12px}
+  .bar{padding:0}
   .btn{font:700 12px var(--sans);color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:10px;
     padding:9px 13px;cursor:pointer;transition:.12s;display:inline-flex;align-items:center;gap:6px}
   .btn:hover{border-color:var(--terra)}
@@ -186,6 +186,37 @@ window.addEventListener('storage',function(e){if(e.key==='tex_theme')location.re
   .cam .shutter{position:absolute;bottom:calc(env(safe-area-inset-bottom) + 28px);left:50%;transform:translateX(-50%);z-index:3;width:74px;height:74px;border-radius:50%;border:5px solid #fff;background:#ffffff33;cursor:pointer;transition:.15s}
   .cam.level .shutter{background:#4caf7d;border-color:#cdebd9}
   .cam .shutter:active{transform:translateX(-50%) scale(.92)}
+
+  /* 重做底部：主操作 CTA + 小工具列 + 乾淨結果卡 */
+  .barP{display:flex;gap:8px;align-items:stretch;padding:10px 12px 6px}
+  .barU{display:flex;gap:6px;align-items:center;padding:0 12px 10px;flex-wrap:wrap}
+  .cta{flex:1;min-height:48px;font:800 15px var(--sans);color:#fff;background:var(--terra);border:0;border-radius:13px;padding:0 14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;box-shadow:0 6px 16px rgba(191,90,47,.26)}
+  .cta:active{transform:scale(.98)}
+  .cta.ok{background:var(--ok);box-shadow:0 6px 16px rgba(76,175,125,.26)}
+  .cta.sec{flex:0 0 auto;background:var(--panel);color:var(--ink);border:1px solid var(--line);box-shadow:none;font:700 13px var(--sans);padding:0 16px}
+  .cta:disabled{background:var(--line);color:var(--muted);box-shadow:none;cursor:default}
+  .segS{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .segS button{font:700 11px var(--sans);border:0;background:var(--panel);padding:8px 12px;cursor:pointer;color:var(--muted)}
+  .segS button.on{background:var(--terra);color:#fff}
+  .sbtn{font:600 11px var(--sans);background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:8px 11px;cursor:pointer;color:var(--muted)}
+  .sbtn:active{transform:scale(.96)}
+  .sbtn:disabled{opacity:.4;cursor:default}
+  .sbtn.danger{color:var(--bad);border-color:#ecc7bd}
+  .pc.act{border-color:var(--terra);box-shadow:0 0 0 2px rgba(191,90,47,.13)}
+  .pc-sp{flex:1}
+  .pc-badge{font:700 9px var(--sans);color:var(--terra);background:color-mix(in srgb,var(--terra) 14%,transparent);border-radius:10px;padding:2px 8px}
+  .pc-del{border:0;background:transparent;color:var(--muted);font-size:13px;cursor:pointer;padding:4px 2px;margin-left:4px}
+  .pc-stats{display:flex;gap:6px;padding:0 12px 10px}
+  .pc-stats div{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:7px 4px;text-align:center}
+  .pc-stats b{display:block;font:800 13px var(--sans);color:var(--ink);line-height:1.2}
+  .pc-stats small{font:500 9px var(--sans);color:var(--muted)}
+  .pc-edges{padding:0 12px 11px}
+  .pc-edges summary{font:600 11px var(--sans);color:var(--terra);cursor:pointer;list-style:none;outline:none}
+  .pc-edges summary::-webkit-details-marker{display:none}
+  .pc-edges .edges{margin-top:8px}
+  html[data-dark="1"] .cta.sec,html[data-dark="1"] .sbtn,html[data-dark="1"] .segS button{background:#2a251d;color:var(--ink)}
+  html[data-dark="1"] .segS button{color:var(--muted)}
+  html[data-dark="1"] .pc-stats div{background:#1c1813}
 
   body.embed .top,body.embed .dock,body.embed .hint,body.embed .conf,body.embed .drop{display:none!important}
 </style>
@@ -355,20 +386,34 @@ function calibrate(){
   if(S.H){ const c=centroid(p); S.scaleCard=localScale(S.H,c[0],c[1]); }
 }
 
-/* ════════════════════ 4 · 量測（mm 全由 H 湧現，零 hardcode）════════════════════ */
+/* ════════════════════ 4 · 量測（mm 全由 H 湧現，零 hardcode；支援弧形邊）════════════════════ */
+// 二次貝茲：控制點讓曲線在 t=0.5 通過使用者拖的「穿越點」M
+const qctrl=(a,m,b)=>[2*m[0]-(a[0]+b[0])/2, 2*m[1]-(a[1]+b[1])/2];
+const qbez=(a,c,b,t)=>{const u=1-t;return [u*u*a[0]+2*u*t*c[0]+t*t*b[0], u*u*a[1]+2*u*t*c[1]+t*t*b[1]];};
+// 第 i 條邊的「穿越點」(影像座標)：有彎就回 bend[i]，沒彎就回中點
+function edgeThru(pc,i){ const P0=pc.pts[i],P2=pc.pts[(i+1)%pc.pts.length],b=pc.bend&&pc.bend[i]; return b||[(P0[0]+P2[0])/2,(P0[1]+P2[1])/2]; }
 function measure(piece){
   if(!S.H||piece.pts.length<2) return null;
-  const mm=piece.pts.map(p=>applyH(S.H,p[0],p[1]));
-  const n=mm.length, closed=piece.closed;
-  const edges=[]; let per=0;
-  const lim=closed?n:n-1;
-  for(let i=0;i<lim;i++){ const a=mm[i],b=mm[(i+1)%n];
-    const L=Math.hypot(b[0]-a[0],b[1]-a[1]); edges.push(L); per+=L; }
+  const n=piece.pts.length, closed=piece.closed, lim=closed?n:n-1;
+  const vmm=piece.pts.map(p=>applyH(S.H,p[0],p[1]));   // 頂點 mm（centroid/標籤/JSON 用）
+  const edges=[], curved=[]; let per=0; const dense=[]; // dense=mm 取樣輪廓（面積/bbox/SVG）
+  for(let i=0;i<lim;i++){
+    const P0=piece.pts[i], P2=piece.pts[(i+1)%n], b=piece.bend&&piece.bend[i];
+    let samp;                                            // 影像座標取樣（含兩端）
+    if(b){ const C=qctrl(P0,b,P2), N=18, a=[]; for(let t=0;t<=N;t++)a.push(qbez(P0,C,P2,t/N)); samp=a; }
+    else samp=[P0,P2];
+    curved.push(!!b);
+    const smm=samp.map(p=>applyH(S.H,p[0],p[1]));
+    let L=0; for(let k=1;k<smm.length;k++)L+=Math.hypot(smm[k][0]-smm[k-1][0],smm[k][1]-smm[k-1][1]);
+    edges.push(L); per+=L;
+    for(let k=0;k<smm.length-1;k++)dense.push(smm[k]);   // 不含該段終點（接下段起點）
+  }
+  if(!closed&&lim>0) dense.push(vmm[n-1]);               // 開放：補最後一個頂點
   let area=0;
-  if(closed&&n>=3){ for(let i=0;i<n;i++){const a=mm[i],b=mm[(i+1)%n];area+=a[0]*b[1]-b[0]*a[1];} area=Math.abs(area)/2; }
-  const xs=mm.map(m=>m[0]), ys=mm.map(m=>m[1]);
+  if(closed&&dense.length>=3){ for(let i=0;i<dense.length;i++){const a=dense[i],c=dense[(i+1)%dense.length];area+=a[0]*c[1]-c[0]*a[1];} area=Math.abs(area)/2; }
+  const xs=dense.map(m=>m[0]), ys=dense.map(m=>m[1]);
   const bbox={w:Math.max(...xs)-Math.min(...xs), h:Math.max(...ys)-Math.min(...ys)};
-  return {mm,edges,perimeter:per,area,bbox,closed};
+  return {mm:vmm,dense,edges,curved,perimeter:per,area,bbox,closed};
 }
 
 /* ════════════════════ 5 · 單位格式 ════════════════════ */
@@ -418,21 +463,33 @@ function drawCard(){
   S.card.forEach((p,i)=>{ handle(p,'#ffce8a',done?5:6);
     if(!done){const[x,y]=i2s(p[0],p[1]);chip(x,y-15,String(i+1),'rgba(20,17,13,.82)');} });
 }
+function piecePath(pc){               // 描裁片路徑（直線 lineTo / 弧形 quadraticCurveTo）
+  const n=pc.pts.length, lim=pc.closed?n:n-1;
+  ctx.beginPath(); const[sx,sy]=i2s(pc.pts[0][0],pc.pts[0][1]); ctx.moveTo(sx,sy);
+  for(let i=0;i<lim;i++){ const P0=pc.pts[i],P2=pc.pts[(i+1)%n],b=pc.bend&&pc.bend[i]; const[ex,ey]=i2s(P2[0],P2[1]);
+    if(b){ const C=qctrl(P0,b,P2),[cx,cy]=i2s(C[0],C[1]); ctx.quadraticCurveTo(cx,cy,ex,ey); }
+    else ctx.lineTo(ex,ey); }
+  if(pc.closed)ctx.closePath();
+}
 function drawPiece(pc,act){
   if(!pc.pts.length)return;
-  poly(pc.pts,pc.closed);
+  piecePath(pc);
   ctx.lineWidth=act?2.5:2;ctx.strokeStyle=pc.color;
   if(pc.closed){ ctx.globalAlpha=act?.16:.09;ctx.fillStyle=pc.color;ctx.fill();ctx.globalAlpha=1; }
   ctx.stroke();
   const m=measure(pc);
-  // 邊長標籤（僅作用中裁片，避免雜亂）
+  // 邊長標籤（作用中裁片，標在穿越點上方避免壓到 handle）
   if(act&&m){ const lim=pc.closed?pc.pts.length:pc.pts.length-1;
-    for(let i=0;i<lim;i++){ const a=pc.pts[i],b=pc.pts[(i+1)%pc.pts.length];
-      const[ax,ay]=i2s(a[0],a[1]),[bx,by]=i2s(b[0],b[1]);
-      chip((ax+bx)/2,(ay+by)/2,fmtLen(m.edges[i]),pc.color+'e6'); } }
-  if(pc.closed&&m){ const c=centroid(pc.pts),[cx,cy]=i2s(c[0],c[1]);
-    if(act) chip(cx,cy,fmtArea(m.area),'rgba(20,17,13,.86)'); }
-  if(act) pc.pts.forEach(p=>handle(p,pc.color,5.5));
+    for(let i=0;i<lim;i++){ const M=edgeThru(pc,i),[mx,my]=i2s(M[0],M[1]);
+      chip(mx,my-15,fmtLen(m.edges[i]),pc.color+'e6'); } }
+  if(pc.closed&&m&&act){ const c=centroid(pc.pts),[cx,cy]=i2s(c[0],c[1]); chip(cx,cy,fmtArea(m.area),'rgba(20,17,13,.86)'); }
+  if(act){
+    pc.pts.forEach(p=>handle(p,pc.color,5.5));                         // 頂點：實心
+    if(pc.closed) for(let i=0;i<pc.pts.length;i++){                    // 邊穿越點：空心環，拖它把邊彎成弧
+      const M=edgeThru(pc,i),[hx,hy]=i2s(M[0],M[1]);
+      ctx.beginPath();ctx.arc(hx,hy,5,0,7);ctx.fillStyle='#fff';ctx.fill();ctx.lineWidth=2.5;ctx.strokeStyle=pc.color;ctx.stroke();
+    }
+  }
 }
 function drawVerify(){
   if(S.verify.length<1)return;
@@ -479,9 +536,23 @@ function hitVertex(sx,sy){            // 命中可拖點（卡角優先，再作
 }
 function startPoint(ip){              // 依模式新增一個「暫定點」，回傳 {arr,idx,kind,isNew}
   if(S.mode==='card'){ if(S.card.length>=4){toast('卡已四角，拖角微調或按重設卡');return null;} S.card.push(ip); return{arr:S.card,idx:S.card.length-1,kind:'card',isNew:true}; }
-  if(S.mode==='trace'){ let pc=S.pieces[S.active]; if(!pc||pc.closed){newPiece();pc=S.pieces[S.active];} pc.pts.push(ip); return{arr:pc.pts,idx:pc.pts.length-1,kind:'piece',isNew:true}; }
+  if(S.mode==='trace'){ let pc=S.pieces[S.active];
+    if(pc&&pc.closed) return null;                       // 已封閉：不再誤加點，先按「描下一片」
+    if(!pc){ newPiece(); pc=S.pieces[S.active]; }
+    pc.pts.push(ip); return{arr:pc.pts,idx:pc.pts.length-1,kind:'piece',isNew:true}; }
   if(S.mode==='verify'){ if(S.verify.length>=2)S.verify=[]; S.verify.push(ip); return{arr:S.verify,idx:S.verify.length-1,kind:'verify',isNew:true}; }
   return null;
+}
+function hitBend(sx,sy){              // 命中作用中「已封閉」裁片的邊穿越點 → 拖它把邊彎成弧
+  const pc=S.pieces[S.active]; if(!pc||!pc.closed||S.mode!=='trace')return null;
+  for(let i=0;i<pc.pts.length;i++){ const M=edgeThru(pc,i),[x,y]=i2s(M[0],M[1]);
+    if(Math.hypot(x-sx,y-sy)<=HIT)return {kind:'bend',pc,i}; }
+  return null;
+}
+function setBend(pc,i,sx,sy){         // 拖穿越點 → 彎；拖回直線中點 → 變回直線
+  if(!pc.bend)pc.bend=[];
+  const P0=pc.pts[i],P2=pc.pts[(i+1)%pc.pts.length],mid=[(P0[0]+P2[0])/2,(P0[1]+P2[1])/2],[mx,my]=i2s(mid[0],mid[1]);
+  pc.bend[i]=(Math.hypot(mx-sx,my-sy)<8)?null:s2i(sx,sy);
 }
 const rectXY=e=>{const r=stage.getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top];};
 
@@ -493,7 +564,7 @@ stage.addEventListener('pointerdown',e=>{
     if(gesture&&gesture.kind==='place'&&gesture.vtx&&gesture.vtx.isNew){ gesture.vtx.arr.splice(gesture.vtx.idx,1); if(gesture.vtx.kind==='card')calibrate(); }
     gesture=null; hideLoupe(); const a=[...ptrs.values()];
     pinch={d:dist(a[0],a[1]),mx:(a[0].x+a[1].x)/2,my:(a[0].y+a[1].y)/2,k:S.cam.k,cx:S.cam.x,cy:S.cam.y}; refresh(); return; }
-  const [sx,sy]=rectXY(e), hit=hitVertex(sx,sy), isTouch=e.pointerType!=='mouse';
+  const [sx,sy]=rectXY(e), hit=hitVertex(sx,sy)||hitBend(sx,sy), isTouch=e.pointerType!=='mouse';
   if(hit){ gesture={kind:'drag',vtx:hit,isTouch}; if(isTouch)showLoupe(sx,sy); }
   else if(isTouch){ const v=startPoint(s2i(sx,sy)); if(v){gesture={kind:'place',vtx:v,isTouch:true};refresh();showLoupe(sx,sy);} else gesture=null; }
   else { gesture={kind:'pan',start:{x:e.clientX,y:e.clientY},cx:S.cam.x,cy:S.cam.y,moved:false}; }   // 滑鼠：拖空白平移、點放開加點
@@ -509,8 +580,9 @@ stage.addEventListener('pointermove',e=>{
   if(!gesture)return;
   const [sx,sy]=rectXY(e);
   if(gesture.kind==='place'||gesture.kind==='drag'){
-    gesture.vtx.arr[gesture.vtx.idx]=s2i(sx,sy);
-    if(gesture.vtx.kind==='card')calibrate();
+    const v=gesture.vtx;
+    if(v.kind==='bend'){ setBend(v.pc,v.i,sx,sy); }
+    else { v.arr[v.idx]=s2i(sx,sy); if(v.kind==='card')calibrate(); }
     refresh(); if(gesture.isTouch)showLoupe(sx,sy);
   }else if(gesture.kind==='pan'){
     const dx=e.clientX-gesture.start.x, dy=e.clientY-gesture.start.y;
@@ -593,43 +665,58 @@ function paintHint(){
   const h=$('#hint'); let t='';
   if(!S.img)t='';
   else if(S.mode==='card')t=S.card.length<4?`順時針點信用卡四角 <b>${S.card.length}/4</b>`:'拖角可微調 · 切到「描裁片」繼續';
-  else if(S.mode==='trace'){const pc=S.pieces[S.active];t=(!pc||pc.closed)?'點裁片輪廓頂點開始描':(pc.pts.length<3?`已點 <b>${pc.pts.length}</b> 點 · 至少 3 點`:`已點 <b>${pc.pts.length}</b> 點 · 回起點封閉`);}
+  else if(S.mode==='trace'){const pc=S.pieces[S.active];
+    t = (pc&&pc.closed) ? '拖頂點微調 · 拖<b>邊中點空心圈</b>把直線拉成弧'
+      : (!pc||!pc.pts.length) ? '單指沿輪廓點頂點（按住看放大鏡，放開才落點）'
+      : (pc.pts.length<3) ? `已點 <b>${pc.pts.length}</b> 點 · 至少 3 點`
+      : `已點 <b>${pc.pts.length}</b> 點 · 按「完成這一片」或點回起點`;}
   else if(S.mode==='verify')t=S.verify.length<2?`點兩個已知距離的端點 <b>${S.verify.length}/2</b>`:'拖端點微調 · 對照下方實測值';
   h.innerHTML=t; h.style.opacity=t?1:0;
 }
 function paintBar(){
   const bar=$('#bar'); bar.innerHTML='';
-  const mk=(label,cls,fn,dis)=>{const b=document.createElement('button');b.className='btn '+(cls||'');b.innerHTML=label;b.disabled=!!dis;b.onclick=fn;bar.appendChild(b);return b;};
-  if(!S.img){ mk('＋ 載入照片','p',()=>$('#fPick').click()); mk('📷 拍照','',()=>$('#fCam').click()); return; }
-  if(S.mode==='card'){
-    mk('↩ 收回上一角','',()=>{S.card.pop();calibrate();refresh();},!S.card.length);
-    mk('✕ 重設卡','danger',()=>{S.card=[];S.H=null;refresh();},!S.card.length);
-    if(S.H)mk('描裁片 →','p',()=>go(3));
-  }else if(S.mode==='trace'||S.mode==='verify'){
-    // 模式切換
-    const seg=document.createElement('div');seg.className='seg';
-    seg.innerHTML=`<button class="${S.mode==='trace'?'on':''}" id="mT">描裁片</button><button class="${S.mode==='verify'?'on':''}" id="mV">核對距離</button>`;
-    bar.appendChild(seg);
-    seg.querySelector('#mT').onclick=()=>{S.mode='trace';paintBar();paintHint();render();};
-    seg.querySelector('#mV').onclick=()=>{S.mode='verify';paintBar();paintHint();render();};
-    if(S.mode==='trace'){
-      const pc=S.pieces[S.active];
-      mk('↩ 收回點','',()=>{if(pc&&pc.pts.length){pc.closed?pc.closed=false:pc.pts.pop();refresh();}},!pc||!pc.pts.length);
-      mk('✓ 封閉','',()=>{if(pc&&pc.pts.length>=3){pc.closed=true;refresh();}},!pc||pc.pts.length<3);
-      mk('＋ 新裁片','',()=>{newPiece();refresh();});
-    }else{
-      mk('清除','',()=>{S.verify=[];refresh();},!S.verify.length);
-    }
+  if(!S.img){
+    const r=document.createElement('div');r.className='barP';
+    r.innerHTML='<button class="cta" id="cCam">📷 對齊拍攝</button><button class="cta sec" id="cPick">＋ 載入照片</button>';
+    bar.appendChild(r); $('#cCam').onclick=openCam; $('#cPick').onclick=()=>$('#fPick').click(); return;
   }
-  // 共用尾段
-  const sp=document.createElement('div');sp.className='spacer';bar.appendChild(sp);
-  const useg=document.createElement('div');useg.className='seg';
-  useg.innerHTML=`<button class="${S.unit==='cm'?'on':''}" id="uC">cm</button><button class="${S.unit==='mm'?'on':''}" id="uM">mm</button>`;
-  bar.appendChild(useg);
-  useg.querySelector('#uC').onclick=()=>{S.unit='cm';refresh();};
-  useg.querySelector('#uM').onclick=()=>{S.unit='mm';refresh();};
-  if(S.H){ mk('⤓ SVG','',exportSVG,!S.pieces.some(p=>p.closed)); mk('⤓ JSON','',exportJSON,!S.pieces.some(p=>p.closed)); }
-  mk('↺ 重來','',reset);
+  const P=document.createElement('div');P.className='barP';bar.appendChild(P);
+  const U=document.createElement('div');U.className='barU';bar.appendChild(U);
+  const cta=(label,cls,fn,dis)=>{const b=document.createElement('button');b.className='cta '+(cls||'');b.innerHTML=label;b.disabled=!!dis;if(fn)b.onclick=fn;P.appendChild(b);return b;};
+  const sbtn=(label,cls,fn,dis)=>{const b=document.createElement('button');b.className='sbtn '+(cls||'');b.innerHTML=label;b.disabled=!!dis;if(fn)b.onclick=fn;U.appendChild(b);return b;};
+
+  if(S.mode==='card'){
+    if(S.H) cta('開始描裁片 →','ok',()=>go(3));
+    else    cta(`點信用卡四角 ${S.card.length}/4`,'',null,true);
+    cta('↩ 收回','sec',()=>{S.card.pop();calibrate();refresh();},!S.card.length);
+    sbtn('✕ 重設卡','danger',()=>{S.card=[];S.H=null;refresh();},!S.card.length);
+  } else if(S.mode==='trace'){
+    const pc=S.pieces[S.active];
+    if(!pc||pc.closed){
+      cta('＋ 描下一片','',()=>{newPiece();refresh();});
+      if(pc&&pc.closed) cta('↺ 改這片','sec',()=>{pc.closed=false;refresh();});
+    } else if(pc.pts.length>=3){
+      cta(`✓ 完成這一片（${pc.pts.length} 點）`,'ok',()=>{pc.closed=true;toast('完成！拖頂點微調、拖邊中點空心圈拉成弧');refresh();});
+      cta('↩ 收回','sec',()=>{pc.pts.pop();refresh();});
+    } else {
+      cta(`再點 ${3-pc.pts.length} 點完成`,'',null,true);
+      cta('↩ 收回','sec',()=>{if(pc.pts.length){pc.pts.pop();refresh();}},!pc.pts.length);
+    }
+  } else if(S.mode==='verify'){
+    cta('清除核對','sec',()=>{S.verify=[];refresh();},!S.verify.length);
+  }
+  // 小工具列：模式切換(非定標時) + 單位 + 匯出 + 重來
+  if(S.mode!=='card'){
+    const seg=document.createElement('div');seg.className='segS';
+    seg.innerHTML=`<button class="${S.mode==='trace'?'on':''}" data-m="trace">描裁片</button><button class="${S.mode==='verify'?'on':''}" data-m="verify">核對</button>`;
+    U.appendChild(seg); seg.querySelectorAll('button').forEach(b=>b.onclick=()=>{S.mode=b.dataset.m;paintBar();paintHint();render();});
+  }
+  const useg=document.createElement('div');useg.className='segS';
+  useg.innerHTML=`<button class="${S.unit==='cm'?'on':''}" data-u="cm">cm</button><button class="${S.unit==='mm'?'on':''}" data-u="mm">mm</button>`;
+  U.appendChild(useg); useg.querySelectorAll('button').forEach(b=>b.onclick=()=>{S.unit=b.dataset.u;refresh();});
+  const sp=document.createElement('div');sp.className='spacer';U.appendChild(sp);
+  const anyClosed=S.pieces.some(p=>p.closed);
+  sbtn('⤓SVG','',exportSVG,!anyClosed); sbtn('⤓JSON','',exportJSON,!anyClosed); sbtn('↺重來','',reset);
 }
 function paintRes(){
   const res=$('#res'), wrap=$('#pieces'); wrap.innerHTML='';
@@ -639,21 +726,33 @@ function paintRes(){
   S.pieces.forEach((pc,i)=>{
     if(!pc.pts.length)return;
     const m=measure(pc), act=i===S.active;
-    const el=document.createElement('div'); el.className='pc'+(act?' act open':'');
-    const kv = pc.closed&&m ? `${fmtArea(m.area)} <small>/ 周長 ${fmtLen(m.perimeter)}</small>` : `${pc.pts.length} 點（未封閉）`;
-    el.innerHTML=`<div class="pc-h">
-        <span class="pc-sw" style="background:${pc.color}"></span>
-        <span class="pc-nm">裁片 ${i+1}</span>
-        <span class="pc-kv">${kv}</span></div>
-      <div class="pc-body">
-        ${m&&pc.closed?`<div style="font:600 11px var(--sans);color:var(--muted)">外框 ${fmtLen(m.bbox.w)} × ${fmtLen(m.bbox.h)}</div>`:''}
-        ${m?`<div class="edges">${m.edges.map((L,j)=>`<i>邊${j+1} ${fmtLen(L)}</i>`).join('')}</div>`:''}
-        <div class="pc-act">
-          <button class="mini" data-act="${i}">設為作用中</button>
-          <button class="mini" data-del="${i}">刪除</button>
-        </div></div>`;
-    el.querySelector('.pc-h').onclick=()=>{S.active=i;paintBar();render();paintRes();};
-    el.querySelector('[data-act]').onclick=ev=>{ev.stopPropagation();S.active=i;refresh();};
+    const el=document.createElement('div'); el.className='pc'+(act?' act':'');
+    if(pc.closed&&m){
+      const nc=m.curved.filter(Boolean).length;
+      el.innerHTML=`
+        <div class="pc-h">
+          <span class="pc-sw" style="background:${pc.color}"></span>
+          <span class="pc-nm">裁片 ${i+1}</span><span class="pc-sp"></span>
+          ${act?'<span class="pc-badge">作用中</span>':''}
+          <button class="pc-del" data-del="${i}" aria-label="刪除">✕</button>
+        </div>
+        <div class="pc-stats">
+          <div><b>${fmtArea(m.area)}</b><small>面積</small></div>
+          <div><b>${fmtLen(m.perimeter)}</b><small>周長</small></div>
+          <div><b>${fmtLen(m.bbox.w)}×${fmtLen(m.bbox.h)}</b><small>外框</small></div>
+        </div>
+        <details class="pc-edges"><summary>邊長明細（${m.edges.length} 邊${nc?` · ${nc} 弧`:''}）▾</summary>
+          <div class="edges">${m.edges.map((L,j)=>`<i>${m.curved[j]?'⌒':''}邊${j+1} ${fmtLen(L)}</i>`).join('')}</div>
+        </details>`;
+    } else {
+      el.innerHTML=`<div class="pc-h">
+          <span class="pc-sw" style="background:${pc.color}"></span>
+          <span class="pc-nm">裁片 ${i+1}</span>
+          <span class="pc-kv">描繪中 · ${pc.pts.length} 點</span><span class="pc-sp"></span>
+          <button class="pc-del" data-del="${i}" aria-label="刪除">✕</button>
+        </div>`;
+    }
+    el.querySelector('.pc-h').onclick=ev=>{ if(ev.target.closest('[data-del]'))return; S.active=i; paintBar(); render(); paintRes(); };
     el.querySelector('[data-del]').onclick=ev=>{ev.stopPropagation();S.pieces.splice(i,1);if(S.active>=S.pieces.length)S.active=Math.max(0,S.pieces.length-1);refresh();};
     wrap.appendChild(el);
   });
@@ -740,10 +839,10 @@ function exportSVG(){
   const ms=S.pieces.filter(p=>p.closed).map(measure).filter(Boolean);
   if(!ms.length){toast('先封閉至少一個裁片');return;}
   let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
-  ms.forEach(m=>m.mm.forEach(([u,v])=>{minx=Math.min(minx,u);miny=Math.min(miny,v);maxx=Math.max(maxx,u);maxy=Math.max(maxy,v);}));
+  ms.forEach(m=>m.dense.forEach(([u,v])=>{minx=Math.min(minx,u);miny=Math.min(miny,v);maxx=Math.max(maxx,u);maxy=Math.max(maxy,v);}));
   const pad=8, W=(maxx-minx)+pad*2, H=(maxy-miny)+pad*2;
   const paths=ms.map((m,i)=>{
-    const d=m.mm.map(([u,v],j)=>`${j?'L':'M'}${(u-minx+pad).toFixed(2)} ${(v-miny+pad).toFixed(2)}`).join(' ')+' Z';
+    const d=m.dense.map(([u,v],j)=>`${j?'L':'M'}${(u-minx+pad).toFixed(2)} ${(v-miny+pad).toFixed(2)}`).join(' ')+' Z';  // dense=含弧形取樣 → 1:1 形狀含曲線
     const c=centroid(m.mm);
     return `<path d="${d}" fill="none" stroke="${PALETTE[i%PALETTE.length]}" stroke-width="0.5"/>`+
            `<text x="${(c[0]-minx+pad).toFixed(1)}" y="${(c[1]-miny+pad).toFixed(1)}" font-size="6" fill="#888" text-anchor="middle">裁片${i+1} · ${(m.area/100).toFixed(0)}cm²</text>`;
@@ -762,7 +861,8 @@ function exportJSON(){
     pieces:S.pieces.filter(p=>p.closed).map((p,i)=>{const m=measure(p);return{
       name:'裁片'+(i+1),mm_points:m.mm.map(a=>[+a[0].toFixed(2),+a[1].toFixed(2)]),
       perimeter_mm:+m.perimeter.toFixed(1),area_mm2:+m.area.toFixed(1),
-      bbox_mm:{w:+m.bbox.w.toFixed(1),h:+m.bbox.h.toFixed(1)},edges_mm:m.edges.map(e=>+e.toFixed(1))};})};
+      bbox_mm:{w:+m.bbox.w.toFixed(1),h:+m.bbox.h.toFixed(1)},edges_mm:m.edges.map(e=>+e.toFixed(1)),
+      curved_edges:m.curved, outline_mm:m.dense.map(a=>[+a[0].toFixed(2),+a[1].toFixed(2)])};})};  // outline=含弧形取樣的真實輪廓
   if(!data.pieces.length){toast('先封閉至少一個裁片');return;}
   deliver(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),`裁片量測_${stamp()}.json`,'application/json');
   toast('量測 JSON 已匯出');
@@ -810,7 +910,7 @@ function drawDemo(){
 
 /* ════════════════════ 14 · headless 測試鉤子 ════════════════════ */
 window.__app={
-  S, calibrate, measure, applyH, computeH, localScale, levelState,
+  S, calibrate, measure, applyH, computeH, localScale, levelState, refresh, paintBar, paintRes,
   // 合成已知案例驗湧現：卡 171.2×108px(=0.5mm/px)、100×100px... 方塊 → 100mm 方
   test(){
     S.imgW=800;S.imgH=600;

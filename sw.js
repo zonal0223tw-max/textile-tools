@@ -1,7 +1,7 @@
 /* 紡織工具站 · service worker
    殼快取 + HTML network-first（迭代期不卡舊版，離線才回快取）。
    設定/資料在 localStorage、照片在記憶體，不經這裡。borrow stock-tools sw。 */
-const CACHE = 'textiletools-v2';
+const CACHE = 'textiletools-v3';
 const SHELL = ['./', './index.html', './manifest.json', './icon.svg',
   './card-measure/index.html', './card-measure/manifest.json', './card-measure/icon.svg'];
 
