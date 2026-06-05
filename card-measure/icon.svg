@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#16130f"/>
+  <!-- T 恤輪廓 -->
+  <path d="M180 150 L150 132 L120 158 L150 196 L168 186 L168 380 L344 380 L344 186 L362 196 L392 158 L362 132 L332 150 Q300 178 256 178 Q212 178 180 150 Z"
+        fill="rgba(191,90,47,.18)" stroke="#bf5a2f" stroke-width="11" stroke-linejoin="round"/>
+  <!-- 信用卡(已知尺寸) -->
+  <rect x="300" y="300" width="118" height="74" rx="9" transform="rotate(-9 359 337)"
+        fill="rgba(255,206,138,.16)" stroke="#ffce8a" stroke-width="7" stroke-dasharray="14 9"/>
+  <!-- 角點 -->
+  <g fill="#ffce8a" stroke="#fff" stroke-width="4">
+    <circle cx="150" cy="132" r="11"/><circle cx="362" cy="132" r="11"/>
+    <circle cx="344" cy="380" r="11"/><circle cx="168" cy="380" r="11"/>
+  </g>
+</svg>

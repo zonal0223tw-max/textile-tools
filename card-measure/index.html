@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>裁片量測台 · Card-Scale Measure</title>
+<meta name="theme-color" content="#fbf8f1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="裁片量測">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.svg">
+<script>
+/* 讀紡織工具站主題 tex_theme：亮/暗 + 主題色，全站同步（同 github.io origin 共用 localStorage） */
+(function(){try{var t=JSON.parse(localStorage.getItem('tex_theme'))||{};var r=document.documentElement;
+  r.setAttribute('data-dark',t.dark?'1':'0');
+  if(t.accent){r.style.setProperty('--terra',t.accent);r.style.setProperty('--terra2',t.accent2||t.accent);}
+  var m=document.querySelector('meta[name=theme-color]');if(m)m.setAttribute('content',t.dark?'#211d17':'#fbf8f1');
+}catch(e){}})();
+window.addEventListener('storage',function(e){if(e.key==='tex_theme')location.reload();});
+</script>
+<!--
+═══════════════════════════════════════════════════════════════════════════
+  裁片量測台 · Card-Scale Pattern Measure
+  ─────────────────────────────────────────────────────────────────────────
+  靈魂：平鋪的衣服是「平面」。放一張信用卡(ISO ID-1 = 85.6×54mm)當已知尺寸，
+        點它四個角 → 解出一個 homography(單應性矩陣)，一魚兩吃：
+          ① 像素→mm 比例尺   ② 透視校正(斜拍也能量準)
+        然後描裁片輪廓，所有真實尺寸(邊長/周長/面積/bbox)由「點座標 × H」湧現，
+        零 hardcode。拖任一個點 → 全部即時重算。
+  定位：手機/平板上的「推估模擬」工具 — QC 平量 / 打版參考，非工業精版。
+  recombine：dye-moisture-log(shrink/deliver/__app) · schema-canvas(pan/zoom)
+             · letterpress(SVG spec-out) · 新寫純 JS homography(新 pattern)
+  零相依、單檔、可離線；?embed=1 = 程序生成封面。
+═══════════════════════════════════════════════════════════════════════════
+-->
+<style>
+  :root{
+    --bg:#f3ede1; --panel:#fbf8f1; --ink:#2c2620; --muted:#9a8f7d;
+    --line:#e4dac7; --terra:#bf5a2f; --terra2:#a64824; --canvas:#16130f;
+    --ok:#4caf7d; --warn:#d99a2b; --bad:#d2543b;
+    --serif:"PingFang TC","Microsoft JhengHei","微軟正黑體","Noto Sans TC",-apple-system,system-ui,sans-serif;
+    --sans:"PingFang TC","Microsoft JhengHei","微軟正黑體","Noto Sans TC",-apple-system,system-ui,"Helvetica Neue",Arial,sans-serif;
+  }
+  /* 深色模式（跟紡織工具站同步）：畫布本就深色，這裡只翻 chrome 表面 */
+  html[data-dark="1"]{ --bg:#15130f; --panel:#211d17; --ink:#f0e9dc; --muted:#998f7d; --line:#3a332a; }
+  html[data-dark="1"] .step,html[data-dark="1"] .btn,html[data-dark="1"] .seg button,
+  html[data-dark="1"] .mini,html[data-dark="1"] .pc{background:#2a251d;color:var(--ink)}
+  html[data-dark="1"] .step b{background:#3a332a;color:var(--muted)}
+  html[data-dark="1"] .seg button{color:var(--muted)}
+  html[data-dark="1"] .edges i{background:#2a251d;color:var(--muted)}
+  html[data-dark="1"] .sheet,html[data-dark="1"] .note{background:#211d17}
+  html[data-dark="1"] .note{color:#c8bca6}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;margin:0}
+  body{color:var(--ink);font-family:var(--sans);background:var(--bg);
+    overflow:hidden;display:flex;flex-direction:column;
+    -webkit-font-smoothing:antialiased;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+
+  /* ── 頂部步驟條 ── */
+  .top{flex:none;background:var(--panel);border-bottom:1px solid var(--line);
+    padding:9px 14px;display:flex;align-items:center;gap:12px}
+  .top .ttl{font:800 16px/1 var(--serif);letter-spacing:.01em;white-space:nowrap}
+  .top .ttl em{color:var(--terra);font-style:normal}
+  .steps{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
+  .step{display:flex;align-items:center;gap:6px;font:700 11px var(--sans);color:var(--muted);
+    border:1px solid var(--line);background:#fff;border-radius:20px;padding:5px 11px 5px 6px;cursor:pointer;transition:.13s}
+  .step b{display:inline-flex;width:18px;height:18px;border-radius:50%;align-items:center;justify-content:center;
+    background:#efe6d4;color:var(--muted);font-size:11px}
+  .step.on{color:#fff;background:var(--terra);border-color:var(--terra)}
+  .step.on b{background:rgba(255,255,255,.28);color:#fff}
+  .step.done b{background:var(--ok);color:#fff}
+  .step.lock{opacity:.45;cursor:not-allowed}
+  .help{flex:none;width:28px;height:28px;border-radius:50%;border:1px solid var(--line);background:#fff;
+    font:700 14px var(--serif);color:var(--terra);cursor:pointer}
+
+  /* ── 畫布 ── */
+  .stage{position:relative;flex:1;min-height:0;background:var(--canvas);overflow:hidden;touch-action:none}
+  #cv{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+  /* 載入大鈕（無圖時） */
+  .drop{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
+    color:#cdbfa8;text-align:center;padding:24px}
+  .drop .ic{font-size:48px;opacity:.8}
+  .drop p{font:500 13px/1.6 var(--sans);max-width:300px;margin:0;color:#9c8f78}
+  .drop .row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+  .bigbtn{font:700 14px var(--sans);color:#fff;background:var(--terra);border:0;border-radius:14px;
+    padding:14px 22px;cursor:pointer;box-shadow:0 8px 22px rgba(191,90,47,.3)}
+  .bigbtn.ghost{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.3);color:#f0e6d4;box-shadow:none}
+  input[type=file]{display:none}
+
+  /* 浮層提示 */
+  .hint{position:absolute;top:12px;left:50%;transform:translateX(-50%);
+    background:rgba(20,17,13,.84);color:#fff;font:600 12.5px/1.4 var(--sans);
+    padding:9px 15px;border-radius:22px;backdrop-filter:blur(6px);max-width:88%;text-align:center;
+    pointer-events:none;transition:.2s;white-space:nowrap}
+  .hint b{color:#ffce8a}
+
+  /* 信心晶片 */
+  .conf{position:absolute;top:12px;right:12px;display:none;align-items:center;gap:7px;
+    background:rgba(251,248,241,.95);border:1px solid var(--line);border-radius:12px;padding:7px 11px;
+    font:700 11px var(--sans);box-shadow:0 6px 18px rgba(60,40,15,.18);cursor:help;max-width:62%}
+  .conf .dot{width:9px;height:9px;border-radius:50%;flex:none;background:var(--ok)}
+  .conf small{font:500 10px var(--sans);color:var(--muted);display:block}
+
+  /* ── 底部面板 ── */
+  .dock{flex:none;background:var(--panel);border-top:1px solid var(--line);
+    max-height:42vh;overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px 12px}
+  .btn{font:700 12px var(--sans);color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:10px;
+    padding:9px 13px;cursor:pointer;transition:.12s;display:inline-flex;align-items:center;gap:6px}
+  .btn:hover{border-color:var(--terra)}
+  .btn:active{transform:scale(.97)}
+  .btn.p{background:var(--terra);color:#fff;border-color:var(--terra)}
+  .btn.danger{color:var(--bad);border-color:#ecc7bd}
+  .btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .seg button{font:700 11px var(--sans);border:0;background:#fff;padding:8px 12px;cursor:pointer;color:var(--muted)}
+  .seg button.on{background:var(--terra);color:#fff}
+  .spacer{flex:1}
+
+  /* 結果 */
+  .res{padding:0 12px 12px}
+  .res.empty{display:none}
+  .pieces{display:flex;flex-direction:column;gap:8px}
+  .pc{border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden}
+  .pc.act{border-color:var(--terra);box-shadow:0 0 0 2px rgba(191,90,47,.13)}
+  .pc-h{display:flex;align-items:center;gap:9px;padding:9px 12px;cursor:pointer}
+  .pc-sw{width:12px;height:12px;border-radius:3px;flex:none}
+  .pc-nm{font:700 13px var(--serif)}
+  .pc-kv{margin-left:auto;font:600 11px ui-monospace,Menlo,monospace;color:var(--terra);text-align:right}
+  .pc-kv small{color:var(--muted);font-weight:500}
+  .pc-body{padding:0 12px 11px;display:none}
+  .pc.open .pc-body{display:block}
+  .edges{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
+  .edges i{font:600 10px ui-monospace,Menlo,monospace;font-style:normal;background:#f3ece0;border-radius:7px;padding:3px 7px;color:#6f6452}
+  .pc-act{display:flex;gap:6px;margin-top:9px}
+  .mini{font:600 10px var(--sans);border:1px solid var(--line);background:#fff;border-radius:8px;padding:5px 9px;cursor:pointer;color:var(--muted)}
+  .mini:hover{border-color:var(--terra);color:var(--terra)}
+
+  .toast{position:fixed;bottom:calc(env(safe-area-inset-bottom) + 16px);left:50%;transform:translateX(-50%);
+    background:#2c2620;color:#fff;font:600 12.5px var(--sans);padding:11px 18px;border-radius:24px;
+    opacity:0;transition:.25s;pointer-events:none;z-index:50;box-shadow:0 10px 30px rgba(0,0,0,.3)}
+  .toast.show{opacity:1}
+
+  /* 說明面板 */
+  .modal{position:fixed;inset:0;background:rgba(20,17,13,.55);display:none;align-items:center;justify-content:center;z-index:60;padding:20px}
+  .modal.show{display:flex}
+  .sheet{background:var(--panel);border-radius:18px;max-width:440px;width:100%;max-height:84vh;overflow-y:auto;
+    padding:22px 22px 18px;box-shadow:0 30px 70px rgba(0,0,0,.4)}
+  .sheet h2{font:800 18px var(--serif);margin:0 0 4px}
+  .sheet h2 em{color:var(--terra);font-style:normal}
+  .sheet .lead{font:500 12px var(--muted);margin:0 0 14px}
+  .sheet ol{margin:0 0 12px;padding-left:20px}
+  .sheet li{font:400 13px/1.7 var(--sans);margin-bottom:3px}
+  .sheet li b{color:var(--terra2)}
+  .note{font:400 12px/1.6 var(--sans);background:#f3ece0;border-left:3px solid var(--terra);border-radius:0 8px 8px 0;padding:10px 13px;margin:12px 0 0;color:#6f6452}
+  .sheet .x{display:block;width:100%;margin-top:16px;font:700 13px var(--sans);color:#fff;background:var(--terra);border:0;border-radius:12px;padding:12px;cursor:pointer}
+
+  body.embed .top,body.embed .dock,body.embed .hint,body.embed .conf,body.embed .drop{display:none!important}
+</style>
+</head>
+<body>
+
+  <div class="top">
+    <div class="ttl">裁片<em>量測台</em></div>
+    <div class="steps" id="steps">
+      <div class="step on" data-step="1"><b>1</b>載入</div>
+      <div class="step lock" data-step="2"><b>2</b>信用卡定標</div>
+      <div class="step lock" data-step="3"><b>3</b>描裁片</div>
+    </div>
+    <button class="help" id="helpBtn" title="說明">?</button>
+  </div>
+
+  <div class="stage" id="stage">
+    <canvas id="cv"></canvas>
+    <div class="drop" id="drop">
+      <div class="ic">👕📐</div>
+      <p>把衣服平鋪、旁邊放一張<b>信用卡</b>當比例尺，從正上方拍一張照片載入。</p>
+      <div class="row">
+        <button class="bigbtn" id="bPick">＋ 載入照片</button>
+        <button class="bigbtn ghost" id="bCam">📷 拍照</button>
+      </div>
+    </div>
+    <div class="hint" id="hint"></div>
+    <div class="conf" id="conf" title="">
+      <span class="dot" id="confDot"></span>
+      <span><span id="confTxt">—</span><small id="confSub"></small></span>
+    </div>
+    <input type="file" accept="image/*" id="fPick">
+    <input type="file" accept="image/*" capture="environment" id="fCam">
+  </div>
+
+  <div class="dock">
+    <div class="bar" id="bar"></div>
+    <div class="res empty" id="res"><div class="pieces" id="pieces"></div></div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <div class="modal" id="modal">
+    <div class="sheet">
+      <h2>裁片<em>量測台</em> · 怎麼用</h2>
+      <p class="lead">平面 + 一張信用卡 = 不用 LiDAR 也能量真實尺寸</p>
+      <ol>
+        <li><b>載入</b>：衣服平鋪，旁邊放一張信用卡，盡量從正上方拍。</li>
+        <li><b>信用卡定標</b>：沿卡邊<b>順時針</b>點四個角。系統用 85.6×54mm 解出比例尺＋透視校正。</li>
+        <li><b>描裁片</b>：沿裁片輪廓點頂點，回到起點封閉。周長／面積／各邊長即時算出。</li>
+        <li><b>核對／匯出</b>：可點兩個已知距離核對精度；匯出 SVG(原寸可印)或量測 JSON。</li>
+      </ol>
+      <p style="font:600 12px var(--sans);margin:14px 0 4px;color:var(--ink)">手勢</p>
+      <ol style="padding-left:20px">
+        <li>單指<b>點</b> = 加一個點；<b>拖既有點</b> = 微調。</li>
+        <li>單指拖空白 = 平移；雙指 = 縮放看細節。</li>
+      </ol>
+      <div class="note">這是<b>推估模擬</b>工具：手機鏡頭畸變、衣服厚度皺褶、布料延展都會帶進誤差，信用卡離裁片越遠誤差越大。適合 QC 平量、打版參考、估尺寸；要做正式工業版仍需人工校版。右上角「信心」晶片會把比例一致性攤給你看。</div>
+      <button class="x" id="closeHelp">開始量</button>
+    </div>
+  </div>
+
+<script>
+/* ════════════════════ 0 · 常數 / DOM ════════════════════ */
+const CARD_W=85.6, CARD_H=54.0;     // ISO/IEC 7810 ID-1 (mm)
+const HIT=17, TAP=8;                // 螢幕 px：命中半徑 / 點擊位移閾值
+const PALETTE=['#bf5a2f','#2f6a6a','#7c5cf0','#c98f3a','#3a6ea5','#4caf7d','#b5311f','#a96f33'];
+const EMBED=new URLSearchParams(location.search).has('embed');
+const $=s=>document.querySelector(s);
+const cv=$('#cv'), stage=$('#stage'), ctx=cv.getContext('2d');
+
+/* ════════════════════ 1 · STATE（唯一真相源）════════════════════ */
+const S={
+  img:null, imgW:0, imgH:0,
+  cam:{x:0,y:0,k:1},
+  step:1, mode:'card',
+  card:[],                 // 影像座標 4 角
+  H:null, scaleCard:1,     // homography(影像→mm) + 卡處 mm/px
+  pieces:[],               // [{pts:[影像座標], closed, color}]
+  active:0,
+  verify:[],               // 兩點核對
+  unit:'cm',
+};
+
+/* ════════════════════ 2 · 畫布 / DPR / 座標 ════════════════════ */
+let DPR=Math.min(window.devicePixelRatio||1, 2.5);
+function resize(){
+  DPR=Math.min(window.devicePixelRatio||1, 2.5);
+  const r=stage.getBoundingClientRect();
+  cv.width=Math.round(r.width*DPR); cv.height=Math.round(r.height*DPR);
+  render();
+}
+const vw=()=>cv.width/DPR, vh=()=>cv.height/DPR;
+// 影像座標 → 螢幕(CSS px)
+const i2s=(x,y)=>[x*S.cam.k+S.cam.x, y*S.cam.k+S.cam.y];
+// 螢幕 → 影像
+const s2i=(sx,sy)=>[(sx-S.cam.x)/S.cam.k, (sy-S.cam.y)/S.cam.k];
+
+function fitView(){
+  if(!S.img)return;
+  const k=Math.min(vw()/S.imgW, vh()/S.imgH)*0.94;
+  S.cam.k=k; S.cam.x=(vw()-S.imgW*k)/2; S.cam.y=(vh()-S.imgH*k)/2;
+}
+
+/* ════════════════════ 3 · HOMOGRAPHY（純 JS DLT 4 點）════════════════════
+   解 8×8 線性系統求 H(h33=1)，把影像像素點映射到信用卡所在的真實 mm 平面。
+   一個輸入(卡四角)同時湧現「比例尺」＋「透視校正」。 */
+function solveLinear(A,b){            // 高斯消去（部分樞軸），n=8
+  const n=b.length, M=A.map((r,i)=>r.concat(b[i]));
+  for(let c=0;c<n;c++){
+    let p=c; for(let r=c+1;r<n;r++) if(Math.abs(M[r][c])>Math.abs(M[p][c])) p=r;
+    if(Math.abs(M[p][c])<1e-12) return null;
+    [M[c],M[p]]=[M[p],M[c]];
+    for(let r=0;r<n;r++){ if(r===c)continue; const f=M[r][c]/M[c][c];
+      for(let k=c;k<=n;k++) M[r][k]-=f*M[c][k]; }
+  }
+  return M.map((r,i)=>r[n]/r[i]);
+}
+function computeH(src,dst){           // src=影像 4 點, dst=mm 4 點
+  const A=[],b=[];
+  for(let i=0;i<4;i++){
+    const [x,y]=src[i], [u,v]=dst[i];
+    A.push([x,y,1,0,0,0,-u*x,-u*y]); b.push(u);
+    A.push([0,0,0,x,y,1,-v*x,-v*y]); b.push(v);
+  }
+  const h=solveLinear(A,b); if(!h)return null;
+  return [[h[0],h[1],h[2]],[h[3],h[4],h[5]],[h[6],h[7],1]];
+}
+function applyH(H,x,y){               // 影像點 → mm
+  const d=H[2][0]*x+H[2][1]*y+1;
+  return [(H[0][0]*x+H[0][1]*y+H[0][2])/d, (H[1][0]*x+H[1][1]*y+H[1][2])/d];
+}
+// 局部線性比例 mm/px（H 在 (x,y) 的 Jacobian 行列式平方根）— 給信心指標用
+function localScale(H,x,y){
+  const D=H[2][0]*x+H[2][1]*y+1;
+  const u=(H[0][0]*x+H[0][1]*y+H[0][2])/D, v=(H[1][0]*x+H[1][1]*y+H[1][2])/D;
+  const ux=(H[0][0]-u*H[2][0])/D, uy=(H[0][1]-u*H[2][1])/D;
+  const vx=(H[1][0]-v*H[2][0])/D, vy=(H[1][1]-v*H[2][1])/D;
+  return Math.sqrt(Math.abs(ux*vy-uy*vx));
+}
+function centroid(pts){let x=0,y=0;for(const p of pts){x+=p[0];y+=p[1];}return [x/pts.length,y/pts.length];}
+
+/* 卡四角→mm：自動判長短邊(免管直放橫放)、解 H、設比例尺 */
+function calibrate(){
+  if(S.card.length<4){ S.H=null; return; }
+  const p=S.card;
+  const e01=Math.hypot(p[1][0]-p[0][0],p[1][1]-p[0][1]);
+  const e12=Math.hypot(p[2][0]-p[1][0],p[2][1]-p[1][1]);
+  const long01=e01>=e12;
+  const A=long01?CARD_W:CARD_H, B=long01?CARD_H:CARD_W;   // p0→p1 邊長
+  const dst=[[0,0],[A,0],[A,B],[0,B]];
+  S.H=computeH(p,dst);
+  if(S.H){ const c=centroid(p); S.scaleCard=localScale(S.H,c[0],c[1]); }
+}
+
+/* ════════════════════ 4 · 量測（mm 全由 H 湧現，零 hardcode）════════════════════ */
+function measure(piece){
+  if(!S.H||piece.pts.length<2) return null;
+  const mm=piece.pts.map(p=>applyH(S.H,p[0],p[1]));
+  const n=mm.length, closed=piece.closed;
+  const edges=[]; let per=0;
+  const lim=closed?n:n-1;
+  for(let i=0;i<lim;i++){ const a=mm[i],b=mm[(i+1)%n];
+    const L=Math.hypot(b[0]-a[0],b[1]-a[1]); edges.push(L); per+=L; }
+  let area=0;
+  if(closed&&n>=3){ for(let i=0;i<n;i++){const a=mm[i],b=mm[(i+1)%n];area+=a[0]*b[1]-b[0]*a[1];} area=Math.abs(area)/2; }
+  const xs=mm.map(m=>m[0]), ys=mm.map(m=>m[1]);
+  const bbox={w:Math.max(...xs)-Math.min(...xs), h:Math.max(...ys)-Math.min(...ys)};
+  return {mm,edges,perimeter:per,area,bbox,closed};
+}
+
+/* ════════════════════ 5 · 單位格式 ════════════════════ */
+function fmtLen(mm){ return S.unit==='cm' ? (mm/10).toFixed(1)+' cm' : Math.round(mm)+' mm'; }
+function fmtArea(mm2){ return S.unit==='cm' ? (mm2/100).toFixed(1)+' cm²' : Math.round(mm2)+' mm²'; }
+
+/* ════════════════════ 6 · RENDER（事件驅動，無 rAF loop）════════════════════ */
+function render(){
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--canvas')||'#16130f';
+  ctx.fillRect(0,0,cv.width,cv.height);
+  if(EMBED){ drawDemo(); return; }
+  if(!S.img) return;
+
+  // 照片（套相機變換）
+  ctx.setTransform(DPR*S.cam.k,0,0,DPR*S.cam.k, DPR*S.cam.x, DPR*S.cam.y);
+  ctx.imageSmoothingQuality='high';
+  ctx.drawImage(S.img,0,0);
+
+  // 疊層（螢幕座標，線寬恆定）
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  drawCard();
+  S.pieces.forEach((pc,i)=>drawPiece(pc,i===S.active));
+  drawVerify();
+}
+function poly(pts,close){ ctx.beginPath();
+  pts.forEach((p,i)=>{const[x,y]=i2s(p[0],p[1]);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+  if(close)ctx.closePath(); }
+function handle(p,fill,r=6){ const[x,y]=i2s(p[0],p[1]);
+  ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.fillStyle=fill;ctx.fill();
+  ctx.lineWidth=2;ctx.strokeStyle='#fff';ctx.stroke(); }
+function chip(x,y,txt,bg){
+  ctx.font='600 11px '+getCSS('--sans'); const w=ctx.measureText(txt).width+12;
+  ctx.fillStyle=bg||'rgba(20,17,13,.82)';
+  roundRect(x-w/2,y-9,w,18,5);ctx.fill();
+  ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(txt,x,y+.5);
+}
+function roundRect(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function getCSS(v){return getComputedStyle(document.documentElement).getPropertyValue(v)||'sans-serif';}
+
+function drawCard(){
+  if(!S.card.length)return;
+  const done=S.card.length>=4;
+  if(S.card.length>=2){ poly(S.card,done);
+    ctx.lineWidth=2;ctx.setLineDash([7,5]);ctx.strokeStyle=done?'#ffce8a':'rgba(255,206,138,.7)';ctx.stroke();ctx.setLineDash([]); }
+  if(done){ const c=centroid(S.card),[cx,cy]=i2s(c[0],c[1]); chip(cx,cy,'信用卡 85.6×54','rgba(191,90,47,.9)'); }
+  S.card.forEach((p,i)=>{ handle(p,'#ffce8a',done?5:6);
+    if(!done){const[x,y]=i2s(p[0],p[1]);chip(x,y-15,String(i+1),'rgba(20,17,13,.82)');} });
+}
+function drawPiece(pc,act){
+  if(!pc.pts.length)return;
+  poly(pc.pts,pc.closed);
+  ctx.lineWidth=act?2.5:2;ctx.strokeStyle=pc.color;
+  if(pc.closed){ ctx.globalAlpha=act?.16:.09;ctx.fillStyle=pc.color;ctx.fill();ctx.globalAlpha=1; }
+  ctx.stroke();
+  const m=measure(pc);
+  // 邊長標籤（僅作用中裁片，避免雜亂）
+  if(act&&m){ const lim=pc.closed?pc.pts.length:pc.pts.length-1;
+    for(let i=0;i<lim;i++){ const a=pc.pts[i],b=pc.pts[(i+1)%pc.pts.length];
+      const[ax,ay]=i2s(a[0],a[1]),[bx,by]=i2s(b[0],b[1]);
+      chip((ax+bx)/2,(ay+by)/2,fmtLen(m.edges[i]),pc.color+'e6'); } }
+  if(pc.closed&&m){ const c=centroid(pc.pts),[cx,cy]=i2s(c[0],c[1]);
+    if(act) chip(cx,cy,fmtArea(m.area),'rgba(20,17,13,.86)'); }
+  if(act) pc.pts.forEach(p=>handle(p,pc.color,5.5));
+}
+function drawVerify(){
+  if(S.verify.length<1)return;
+  if(S.verify.length===2){ poly(S.verify,false);
+    ctx.lineWidth=2.5;ctx.strokeStyle='#3a6ea5';ctx.setLineDash([2,4]);ctx.stroke();ctx.setLineDash([]);
+    const m=S.H?Math.hypot(...(()=>{const a=applyH(S.H,...S.verify[0]),b=applyH(S.H,...S.verify[1]);return[b[0]-a[0],b[1]-a[1]];})()):0;
+    const c=centroid(S.verify),[cx,cy]=i2s(c[0],c[1]); chip(cx,cy-14,'核對 '+fmtLen(m),'rgba(58,110,165,.92)'); }
+  S.verify.forEach(p=>handle(p,'#3a6ea5',5.5));
+}
+
+/* ════════════════════ 7 · 信心指標（誠實的精度提示）════════════════════ */
+function updateConf(){
+  const el=$('#conf');
+  if(!S.H){ el.style.display='none'; return; }
+  el.style.display='flex';
+  // 卡佔畫面比例
+  const xs=S.card.map(p=>p[0]),ys=S.card.map(p=>p[1]);
+  const cardSpan=Math.max(Math.max(...xs)-Math.min(...xs),Math.max(...ys)-Math.min(...ys));
+  const frac=cardSpan/Math.max(S.imgW,S.imgH);
+  // 比例一致性：卡處 vs 裁片處 mm/px
+  let ratio=1;
+  const pc=S.pieces[S.active];
+  if(pc&&pc.pts.length){ const c=centroid(pc.pts); ratio=localScale(S.H,c[0],c[1])/S.scaleCard; }
+  const diverge=Math.abs(Math.log(ratio));   // 0 = 完全一致
+  let lvl=2, msg='高';                         // 2 綠 / 1 黃 / 0 紅
+  if(frac<0.10||diverge>0.22){lvl=0;msg='低';}
+  else if(frac<0.18||diverge>0.10){lvl=1;msg='中';}
+  const col=['var(--bad)','var(--warn)','var(--ok)'][lvl];
+  $('#confDot').style.background=col;
+  $('#confTxt').textContent='信心 '+msg;
+  $('#confSub').textContent='卡佔畫面 '+(frac*100).toFixed(0)+'%';
+  el.title=`信心是「推估可靠度」的粗略提示，非誤差保證：\n· 卡佔畫面 ${(frac*100).toFixed(0)}%（越大越準，建議>18%）\n· 卡↔裁片比例差 ${(Math.abs(ratio-1)*100).toFixed(0)}%（越小越準）\n卡離裁片越遠、拍得越斜，外推誤差越大。可用「核對距離」實測校正。`;
+}
+
+/* ════════════════════ 8 · 互動（Pointer：點/拖點/平移/雙指縮放）════════════════════ */
+const ptrs=new Map(); let gesture=null, pinch=null;
+function hitVertex(sx,sy){            // 回傳 {list,idx} 命中的可拖點（卡角優先，再作用中裁片）
+  const test=(arr)=>{for(let i=0;i<arr.length;i++){const[x,y]=i2s(arr[i][0],arr[i][1]);if(Math.hypot(x-sx,y-sy)<=HIT)return i;}return -1;};
+  let i=test(S.card); if(i>=0)return{arr:S.card,idx:i,kind:'card'};
+  const pc=S.pieces[S.active]; if(pc){i=test(pc.pts);if(i>=0)return{arr:pc.pts,idx:i,kind:'piece'};}
+  if(S.mode==='verify'){i=test(S.verify);if(i>=0)return{arr:S.verify,idx:i,kind:'verify'};}
+  return null;
+}
+stage.addEventListener('pointerdown',e=>{
+  if(!S.img||EMBED)return;
+  stage.setPointerCapture(e.pointerId);
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(ptrs.size===2){ gesture=null; const a=[...ptrs.values()];
+    pinch={d:dist(a[0],a[1]),mx:(a[0].x+a[1].x)/2,my:(a[0].y+a[1].y)/2,k:S.cam.k,cx:S.cam.x,cy:S.cam.y}; return; }
+  const r=stage.getBoundingClientRect(), sx=e.clientX-r.left, sy=e.clientY-r.top;
+  const v=hitVertex(sx,sy);
+  gesture={start:{x:e.clientX,y:e.clientY},moved:false,
+           vtx:v, cx:S.cam.x,cy:S.cam.y};
+});
+stage.addEventListener('pointermove',e=>{
+  if(!ptrs.has(e.pointerId))return;
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pinch&&ptrs.size>=2){ const a=[...ptrs.values()]; const d=dist(a[0],a[1]),mx=(a[0].x+a[1].x)/2,my=(a[0].y+a[1].y)/2;
+    const r=stage.getBoundingClientRect(); const f=d/pinch.d;
+    const wx=(pinch.mx-r.left-pinch.cx)/pinch.k, wy=(pinch.my-r.top-pinch.cy)/pinch.k;
+    S.cam.k=clamp(pinch.k*f,0.08,12);
+    S.cam.x=(mx-r.left)-wx*S.cam.k; S.cam.y=(my-r.top)-wy*S.cam.k;
+    render(); return; }
+  if(!gesture)return;
+  const dx=e.clientX-gesture.start.x, dy=e.clientY-gesture.start.y;
+  if(!gesture.moved && Math.hypot(dx,dy)>TAP) gesture.moved=true;
+  if(!gesture.moved)return;
+  if(gesture.vtx){ const r=stage.getBoundingClientRect();
+    gesture.vtx.arr[gesture.vtx.idx]=s2i(e.clientX-r.left,e.clientY-r.top);
+    if(gesture.vtx.kind==='card')calibrate();
+    refresh(); }
+  else{ S.cam.x=gesture.cx+dx; S.cam.y=gesture.cy+dy; render(); }
+});
+function endPtr(e){
+  if(!ptrs.has(e.pointerId))return;
+  const wasTap=gesture && !gesture.moved && !pinch;
+  if(wasTap){ const r=stage.getBoundingClientRect(); tap(e.clientX-r.left,e.clientY-r.top); }
+  ptrs.delete(e.pointerId);
+  if(ptrs.size<2)pinch=null;
+  if(ptrs.size===0)gesture=null;
+}
+stage.addEventListener('pointerup',endPtr);
+stage.addEventListener('pointercancel',endPtr);
+stage.addEventListener('wheel',e=>{ if(!S.img||EMBED)return; e.preventDefault();
+  const r=stage.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
+  const wx=(mx-S.cam.x)/S.cam.k, wy=(my-S.cam.y)/S.cam.k;
+  S.cam.k=clamp(S.cam.k*(e.deltaY<0?1.12:1/1.12),0.08,12);
+  S.cam.x=mx-wx*S.cam.k; S.cam.y=my-wy*S.cam.k; render();
+},{passive:false});
+const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+function tap(sx,sy){                  // 點擊 = 加點（依模式）
+  const ip=s2i(sx,sy);
+  if(S.mode==='card'){
+    if(S.card.length>=4){ toast('卡已定標，可拖角微調或按「重設卡」'); return; }
+    S.card.push(ip);
+    if(S.card.length===4){ calibrate(); if(S.H){ go(3); toast('定標完成！開始描裁片'); } else toast('四角太接近，請重設卡重點'); }
+    refresh();
+  }else if(S.mode==='trace'){
+    const pc=S.pieces[S.active]; if(!pc||pc.closed){ newPiece(); }
+    const cur=S.pieces[S.active];
+    if(cur.pts.length>=3){ const[fx,fy]=i2s(cur.pts[0][0],cur.pts[0][1]);
+      if(Math.hypot(fx-sx,fy-sy)<=HIT*1.5){ cur.closed=true; toast('裁片已封閉'); refresh(); return; } }
+    cur.pts.push(ip); refresh();
+  }else if(S.mode==='verify'){
+    if(S.verify.length>=2)S.verify=[]; S.verify.push(ip); refresh();
+  }
+}
+
+/* ════════════════════ 9 · 步驟 / 工具列 / 結果 ════════════════════ */
+function go(step){
+  if(step===2&&!S.img)return;
+  if(step===3&&!S.H){ toast('請先完成信用卡定標'); step=2; }
+  S.step=step; S.mode = step===2?'card' : step===3?'trace' : S.mode;
+  paintSteps(); paintBar(); paintHint(); refresh();
+}
+function paintSteps(){
+  document.querySelectorAll('.step').forEach(el=>{
+    const n=+el.dataset.step; el.classList.toggle('on',n===S.step);
+    el.classList.toggle('done', (n===1&&S.img)||(n===2&&S.H));
+    el.classList.toggle('lock', (n===2&&!S.img)||(n===3&&!S.H));
+  });
+}
+function paintHint(){
+  const h=$('#hint'); let t='';
+  if(!S.img)t='';
+  else if(S.mode==='card')t=S.card.length<4?`順時針點信用卡四角 <b>${S.card.length}/4</b>`:'拖角可微調 · 切到「描裁片」繼續';
+  else if(S.mode==='trace'){const pc=S.pieces[S.active];t=(!pc||pc.closed)?'點裁片輪廓頂點開始描':(pc.pts.length<3?`已點 <b>${pc.pts.length}</b> 點 · 至少 3 點`:`已點 <b>${pc.pts.length}</b> 點 · 回起點封閉`);}
+  else if(S.mode==='verify')t=S.verify.length<2?`點兩個已知距離的端點 <b>${S.verify.length}/2</b>`:'拖端點微調 · 對照下方實測值';
+  h.innerHTML=t; h.style.opacity=t?1:0;
+}
+function paintBar(){
+  const bar=$('#bar'); bar.innerHTML='';
+  const mk=(label,cls,fn,dis)=>{const b=document.createElement('button');b.className='btn '+(cls||'');b.innerHTML=label;b.disabled=!!dis;b.onclick=fn;bar.appendChild(b);return b;};
+  if(!S.img){ mk('＋ 載入照片','p',()=>$('#fPick').click()); mk('📷 拍照','',()=>$('#fCam').click()); return; }
+  if(S.mode==='card'){
+    mk('↩ 收回上一角','',()=>{S.card.pop();calibrate();refresh();},!S.card.length);
+    mk('✕ 重設卡','danger',()=>{S.card=[];S.H=null;refresh();},!S.card.length);
+    if(S.H)mk('描裁片 →','p',()=>go(3));
+  }else if(S.mode==='trace'||S.mode==='verify'){
+    // 模式切換
+    const seg=document.createElement('div');seg.className='seg';
+    seg.innerHTML=`<button class="${S.mode==='trace'?'on':''}" id="mT">描裁片</button><button class="${S.mode==='verify'?'on':''}" id="mV">核對距離</button>`;
+    bar.appendChild(seg);
+    seg.querySelector('#mT').onclick=()=>{S.mode='trace';paintBar();paintHint();render();};
+    seg.querySelector('#mV').onclick=()=>{S.mode='verify';paintBar();paintHint();render();};
+    if(S.mode==='trace'){
+      const pc=S.pieces[S.active];
+      mk('↩ 收回點','',()=>{if(pc&&pc.pts.length){pc.closed?pc.closed=false:pc.pts.pop();refresh();}},!pc||!pc.pts.length);
+      mk('✓ 封閉','',()=>{if(pc&&pc.pts.length>=3){pc.closed=true;refresh();}},!pc||pc.pts.length<3);
+      mk('＋ 新裁片','',()=>{newPiece();refresh();});
+    }else{
+      mk('清除','',()=>{S.verify=[];refresh();},!S.verify.length);
+    }
+  }
+  // 共用尾段
+  const sp=document.createElement('div');sp.className='spacer';bar.appendChild(sp);
+  const useg=document.createElement('div');useg.className='seg';
+  useg.innerHTML=`<button class="${S.unit==='cm'?'on':''}" id="uC">cm</button><button class="${S.unit==='mm'?'on':''}" id="uM">mm</button>`;
+  bar.appendChild(useg);
+  useg.querySelector('#uC').onclick=()=>{S.unit='cm';refresh();};
+  useg.querySelector('#uM').onclick=()=>{S.unit='mm';refresh();};
+  if(S.H){ mk('⤓ SVG','',exportSVG,!S.pieces.some(p=>p.closed)); mk('⤓ JSON','',exportJSON,!S.pieces.some(p=>p.closed)); }
+  mk('↺ 重來','',reset);
+}
+function paintRes(){
+  const res=$('#res'), wrap=$('#pieces'); wrap.innerHTML='';
+  const list=S.pieces.filter(p=>p.pts.length);
+  res.classList.toggle('empty',!list.length||!S.H);
+  if(!S.H)return;
+  S.pieces.forEach((pc,i)=>{
+    if(!pc.pts.length)return;
+    const m=measure(pc), act=i===S.active;
+    const el=document.createElement('div'); el.className='pc'+(act?' act open':'');
+    const kv = pc.closed&&m ? `${fmtArea(m.area)} <small>/ 周長 ${fmtLen(m.perimeter)}</small>` : `${pc.pts.length} 點（未封閉）`;
+    el.innerHTML=`<div class="pc-h">
+        <span class="pc-sw" style="background:${pc.color}"></span>
+        <span class="pc-nm">裁片 ${i+1}</span>
+        <span class="pc-kv">${kv}</span></div>
+      <div class="pc-body">
+        ${m&&pc.closed?`<div style="font:600 11px var(--sans);color:var(--muted)">外框 ${fmtLen(m.bbox.w)} × ${fmtLen(m.bbox.h)}</div>`:''}
+        ${m?`<div class="edges">${m.edges.map((L,j)=>`<i>邊${j+1} ${fmtLen(L)}</i>`).join('')}</div>`:''}
+        <div class="pc-act">
+          <button class="mini" data-act="${i}">設為作用中</button>
+          <button class="mini" data-del="${i}">刪除</button>
+        </div></div>`;
+    el.querySelector('.pc-h').onclick=()=>{S.active=i;paintBar();render();paintRes();};
+    el.querySelector('[data-act]').onclick=ev=>{ev.stopPropagation();S.active=i;refresh();};
+    el.querySelector('[data-del]').onclick=ev=>{ev.stopPropagation();S.pieces.splice(i,1);if(S.active>=S.pieces.length)S.active=Math.max(0,S.pieces.length-1);refresh();};
+    wrap.appendChild(el);
+  });
+}
+function newPiece(){ S.pieces.push({pts:[],closed:false,color:PALETTE[S.pieces.length%PALETTE.length]}); S.active=S.pieces.length-1; }
+function refresh(){ calibrate?0:0; paintSteps(); paintHint(); paintRes(); updateConf(); render(); }
+
+/* ════════════════════ 10 · 載圖 ════════════════════ */
+async function shrink(file,max=1600,q=0.72){
+  let w,h,draw;
+  try{ const bmp=await createImageBitmap(file,{imageOrientation:'from-image'});
+    w=bmp.width;h=bmp.height;draw=c=>{c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);bmp.close&&bmp.close();};
+  }catch(e){ const img=await new Promise((res,rej)=>{const i=new Image();const u=URL.createObjectURL(file);i.onload=()=>{URL.revokeObjectURL(u);res(i);};i.onerror=rej;i.src=u;});
+    w=img.naturalWidth;h=img.naturalHeight;draw=c=>c.getContext('2d').drawImage(img,0,0,c.width,c.height); }
+  const sc=Math.min(1,max/Math.max(w,h));
+  const c=document.createElement('canvas');c.width=Math.round(w*sc);c.height=Math.round(h*sc);draw(c);
+  return c;
+}
+async function loadFile(file){
+  if(!file)return;
+  try{
+    const c=await shrink(file);
+    S.img=await createImageBitmap(c); S.imgW=c.width; S.imgH=c.height;
+    S.card=[];S.H=null;S.pieces=[];S.active=0;S.verify=[];
+    $('#drop').style.display='none';
+    fitView(); go(2);
+  }catch(e){ toast('讀圖失敗：'+e.message); }
+}
+$('#fPick').onchange=e=>loadFile(e.target.files[0]);
+$('#fCam').onchange=e=>loadFile(e.target.files[0]);
+$('#bPick').onclick=()=>$('#fPick').click();
+$('#bCam').onclick=()=>$('#fCam').click();
+
+/* ════════════════════ 11 · 匯出（SVG 1:1 / JSON）════════════════════ */
+const deliver=async(blob,filename,mime)=>{
+  try{const f=new File([blob],filename,{type:mime});
+    if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:filename});return;}
+  }catch(e){if(e&&e.name==='AbortError')return;}
+  const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filename;
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);
+};
+function stamp(){const d=new Date();const p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;}
+function exportSVG(){
+  const ms=S.pieces.filter(p=>p.closed).map(measure).filter(Boolean);
+  if(!ms.length){toast('先封閉至少一個裁片');return;}
+  let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
+  ms.forEach(m=>m.mm.forEach(([u,v])=>{minx=Math.min(minx,u);miny=Math.min(miny,v);maxx=Math.max(maxx,u);maxy=Math.max(maxy,v);}));
+  const pad=8, W=(maxx-minx)+pad*2, H=(maxy-miny)+pad*2;
+  const paths=ms.map((m,i)=>{
+    const d=m.mm.map(([u,v],j)=>`${j?'L':'M'}${(u-minx+pad).toFixed(2)} ${(v-miny+pad).toFixed(2)}`).join(' ')+' Z';
+    const c=centroid(m.mm);
+    return `<path d="${d}" fill="none" stroke="${PALETTE[i%PALETTE.length]}" stroke-width="0.5"/>`+
+           `<text x="${(c[0]-minx+pad).toFixed(1)}" y="${(c[1]-miny+pad).toFixed(1)}" font-size="6" fill="#888" text-anchor="middle">裁片${i+1} · ${(m.area/100).toFixed(0)}cm²</text>`;
+  }).join('\n  ');
+  const svg=`<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${W.toFixed(1)}mm" height="${H.toFixed(1)}mm" viewBox="0 0 ${W.toFixed(1)} ${H.toFixed(1)}">
+  <!-- 裁片量測台 1:1 原寸(mm)。列印請選「實際大小/100%」，可拼接成紙版。 -->
+  <rect x="0" y="0" width="${W.toFixed(1)}" height="${H.toFixed(1)}" fill="#fff"/>
+  ${paths}
+</svg>`;
+  deliver(new Blob([svg],{type:'image/svg+xml'}),`裁片_${stamp()}.svg`,'image/svg+xml');
+  toast('SVG（1:1 原寸）已匯出');
+}
+function exportJSON(){
+  const data={app:'card-measure',v:1,unit:'mm',card:{w:CARD_W,h:CARD_H},exportedAt:Date.now(),
+    pieces:S.pieces.filter(p=>p.closed).map((p,i)=>{const m=measure(p);return{
+      name:'裁片'+(i+1),mm_points:m.mm.map(a=>[+a[0].toFixed(2),+a[1].toFixed(2)]),
+      perimeter_mm:+m.perimeter.toFixed(1),area_mm2:+m.area.toFixed(1),
+      bbox_mm:{w:+m.bbox.w.toFixed(1),h:+m.bbox.h.toFixed(1)},edges_mm:m.edges.map(e=>+e.toFixed(1))};})};
+  if(!data.pieces.length){toast('先封閉至少一個裁片');return;}
+  deliver(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),`裁片量測_${stamp()}.json`,'application/json');
+  toast('量測 JSON 已匯出');
+}
+function reset(){ if(!confirm('清空目前所有定標與裁片？'))return;
+  S.img=null;S.card=[];S.H=null;S.pieces=[];S.verify=[];S.active=0;
+  $('#drop').style.display='flex'; go(1); }
+
+/* ════════════════════ 12 · 雜項 ════════════════════ */
+let toastT;
+function toast(m){const el=$('#toast');el.textContent=m;el.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>el.classList.remove('show'),2200);}
+$('#helpBtn').onclick=()=>$('#modal').classList.add('show');
+$('#closeHelp').onclick=()=>$('#modal').classList.remove('show');
+$('#modal').onclick=e=>{if(e.target===$('#modal'))$('#modal').classList.remove('show');};
+document.querySelectorAll('.step').forEach(el=>el.onclick=()=>{if(!el.classList.contains('lock'))go(+el.dataset.step);});
+window.addEventListener('resize',resize);
+
+/* ════════════════════ 13 · ?embed 封面（程序生成，無互動）════════════════════ */
+function drawDemo(){
+  const W=cv.width,H=cv.height,S0=Math.min(W,H);
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle='#16130f';ctx.fillRect(0,0,W,H);
+  ctx.translate(W/2,H/2); const u=S0/620;
+  // T 恤輪廓
+  ctx.beginPath();
+  const tee=[[-150,-150],[-90,-180],[-50,-150],[50,-150],[90,-180],[150,-150],[110,-90],[80,-110],[80,180],[-80,180],[-80,-110],[-110,-90]];
+  tee.forEach((p,i)=>{const x=p[0]*u,y=p[1]*u;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();
+  ctx.fillStyle='rgba(191,90,47,.13)';ctx.fill();
+  ctx.lineWidth=2.4;ctx.strokeStyle='#bf5a2f';ctx.stroke();
+  tee.forEach(p=>{ctx.beginPath();ctx.arc(p[0]*u,p[1]*u,4.5,0,7);ctx.fillStyle='#ffce8a';ctx.fill();ctx.lineWidth=1.6;ctx.strokeStyle='#fff';ctx.stroke();});
+  // 信用卡
+  ctx.save();ctx.translate(120*u,150*u);ctx.rotate(-.13);
+  ctx.fillStyle='rgba(255,206,138,.16)';ctx.strokeStyle='#ffce8a';ctx.lineWidth=2;ctx.setLineDash([6,4]);
+  roundRect(-43*u,-27*u,86*u,54*u,5*u);ctx.fill();ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle='#ffce8a';ctx.font=`700 ${13*u}px ${getCSS('--sans')}`;ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('85.6mm',0,0);ctx.restore();
+  // 尺寸標
+  ctx.fillStyle='rgba(20,17,13,.82)';ctx.strokeStyle='#bf5a2f';
+  const lab=(x,y,t)=>{ctx.font=`600 ${12*u}px ${getCSS('--sans')}`;const w=ctx.measureText(t).width+12*u;
+    ctx.fillStyle='rgba(20,17,13,.82)';roundRect(x-w/2,y-10*u,w,20*u,5*u);ctx.fill();ctx.fillStyle='#fff';ctx.fillText(t,x,y+u);};
+  lab(0,-150*u,'肩寬 46.0 cm');lab(135*u,30*u,'胸寬 52.0 cm');lab(0,180*u,'衣長 71.0 cm');
+  ctx.font=`800 ${20*u}px ${getCSS('--serif')}`;ctx.fillStyle='#f3e6d2';ctx.fillText('裁片量測台',0,-235*u);
+  ctx.font=`500 ${11*u}px ${getCSS('--sans')}`;ctx.fillStyle='#9c8f78';ctx.fillText('信用卡定標 · 描輪廓 · 真實尺寸湧現',0,-212*u);
+}
+
+/* ════════════════════ 14 · headless 測試鉤子 ════════════════════ */
+window.__app={
+  S, calibrate, measure, applyH, computeH, localScale,
+  // 合成已知案例驗湧現：卡 171.2×108px(=0.5mm/px)、100×100px... 方塊 → 100mm 方
+  test(){
+    S.imgW=800;S.imgH=600;
+    S.card=[[100,100],[271.2,100],[271.2,208],[100,208]]; // 171.2×108 px
+    calibrate();
+    const sq={pts:[[100,100],[300,100],[300,300],[100,300]],closed:true,color:'#000'};
+    const m=measure(sq);
+    const cardMM=S.card.map(p=>applyH(S.H,p[0],p[1]));
+    return { H:!!S.H, scaleCard:+S.scaleCard.toFixed(4),
+      cardW:+Math.hypot(cardMM[1][0]-cardMM[0][0],cardMM[1][1]-cardMM[0][1]).toFixed(3),
+      cardH:+Math.hypot(cardMM[2][0]-cardMM[1][0],cardMM[2][1]-cardMM[1][1]).toFixed(3),
+      squareEdge:+m.edges[0].toFixed(2), perimeter:+m.perimeter.toFixed(2),
+      area:+m.area.toFixed(1), bbox:{w:+m.bbox.w.toFixed(2),h:+m.bbox.h.toFixed(2)} };
+  }
+};
+
+/* ════════════════════ boot ════════════════════ */
+function boot(){
+  if(EMBED){document.body.classList.add('embed');}
+  resize();
+  paintSteps();paintBar();paintHint();
+}
+boot();
+</script>
+</body>
+</html>

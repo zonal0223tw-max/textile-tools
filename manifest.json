@@ -1,0 +1,14 @@
+{
+  "name": "紡織工具",
+  "short_name": "紡織工具",
+  "description": "現場用的布廠 / QC 小工具站。零相依、可離線、加到主畫面即 App。",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#15130f",
+  "theme_color": "#bf5a2f",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

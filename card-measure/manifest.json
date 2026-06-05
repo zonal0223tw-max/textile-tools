@@ -1,0 +1,14 @@
+{
+  "name": "裁片量測台",
+  "short_name": "裁片量測",
+  "description": "信用卡定標 → 描裁片輪廓 → 真實尺寸湧現。手機/平板平鋪量測推估工具。",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#16130f",
+  "theme_color": "#fbf8f1",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
