@@ -560,12 +560,19 @@ stage.addEventListener('pointerdown',e=>{
   if(!S.img||EMBED)return;
   stage.setPointerCapture(e.pointerId);
   ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
-  if(ptrs.size===2){                  // 第二指落下 → 取消暫定點、進雙指平移/縮放
-    if(gesture&&gesture.kind==='place'&&gesture.vtx&&gesture.vtx.isNew){ gesture.vtx.arr.splice(gesture.vtx.idx,1); if(gesture.vtx.kind==='card')calibrate(); }
+  if(ptrs.size===2){                  // 第二指落下 → 還原第一指剛動到的點，進雙指平移/縮放（縮放永不改幾何）
+    if(gesture){ const v=gesture.vtx;
+      if(gesture.kind==='place'&&v&&v.isNew){ v.arr.splice(v.idx,1); if(v.kind==='card')calibrate(); }
+      else if(gesture.kind==='drag'&&v){
+        if(v.kind==='bend'){ if(!v.pc.bend)v.pc.bend=[]; v.pc.bend[v.i]=gesture.orig; }
+        else { v.arr[v.idx]=gesture.orig; if(v.kind==='card')calibrate(); }
+      }
+    }
     gesture=null; hideLoupe(); const a=[...ptrs.values()];
     pinch={d:dist(a[0],a[1]),mx:(a[0].x+a[1].x)/2,my:(a[0].y+a[1].y)/2,k:S.cam.k,cx:S.cam.x,cy:S.cam.y}; refresh(); return; }
   const [sx,sy]=rectXY(e), hit=hitVertex(sx,sy)||hitBend(sx,sy), isTouch=e.pointerType!=='mouse';
-  if(hit){ gesture={kind:'drag',vtx:hit,isTouch}; if(isTouch)showLoupe(sx,sy); }
+  if(hit){ const orig = hit.kind==='bend' ? ((hit.pc.bend&&hit.pc.bend[hit.i])?hit.pc.bend[hit.i].slice():null) : hit.arr[hit.idx].slice();
+    gesture={kind:'drag',vtx:hit,isTouch,orig}; if(isTouch)showLoupe(sx,sy); }
   else if(isTouch){ const v=startPoint(s2i(sx,sy)); if(v){gesture={kind:'place',vtx:v,isTouch:true};refresh();showLoupe(sx,sy);} else gesture=null; }
   else { gesture={kind:'pan',start:{x:e.clientX,y:e.clientY},cx:S.cam.x,cy:S.cam.y,moved:false}; }   // 滑鼠：拖空白平移、點放開加點
 });
