@@ -214,9 +214,14 @@ window.addEventListener('storage',function(e){if(e.key==='tex_theme')location.re
   .pc-edges summary{font:600 11px var(--sans);color:var(--terra);cursor:pointer;list-style:none;outline:none}
   .pc-edges summary::-webkit-details-marker{display:none}
   .pc-edges .edges{margin-top:8px}
+  .pom{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:0 12px 11px}
+  .pom div{background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:7px 3px;text-align:center}
+  .pom b{display:block;font:800 12.5px var(--sans);color:var(--ink);line-height:1.15}
+  .pom small{font:500 9px var(--sans);color:var(--muted)}
+  @media(max-width:360px){.pom{grid-template-columns:repeat(3,1fr)}}
   html[data-dark="1"] .cta.sec,html[data-dark="1"] .sbtn,html[data-dark="1"] .segS button{background:#2a251d;color:var(--ink)}
   html[data-dark="1"] .segS button{color:var(--muted)}
-  html[data-dark="1"] .pc-stats div{background:#1c1813}
+  html[data-dark="1"] .pc-stats div,html[data-dark="1"] .pom div{background:#1c1813}
 
   body.embed .top,body.embed .dock,body.embed .hint,body.embed .conf,body.embed .drop{display:none!important}
 </style>
@@ -312,6 +317,7 @@ const S={
   pieces:[],               // [{pts:[影像座標], closed, color}]
   active:0,
   verify:[],               // 兩點核對
+  tmpl:null,               // 款式模板 {garment, pts:{id:[x,y]影像座標}}（右半+中軸，左半鏡像算）
   unit:'cm',
 };
 
@@ -437,6 +443,7 @@ function render(){
   ctx.setTransform(DPR,0,0,DPR,0,0);
   drawCard();
   S.pieces.forEach((pc,i)=>drawPiece(pc,i===S.active));
+  drawTmpl();
   drawVerify();
 }
 function poly(pts,close){ ctx.beginPath();
@@ -565,13 +572,16 @@ stage.addEventListener('pointerdown',e=>{
       if(gesture.kind==='place'&&v&&v.isNew){ v.arr.splice(v.idx,1); if(v.kind==='card')calibrate(); }
       else if(gesture.kind==='drag'&&v){
         if(v.kind==='bend'){ if(!v.pc.bend)v.pc.bend=[]; v.pc.bend[v.i]=gesture.orig; }
+        else if(v.kind==='tmpl'){ S.tmpl.pts[v.id]=gesture.orig; }
         else { v.arr[v.idx]=gesture.orig; if(v.kind==='card')calibrate(); }
       }
     }
     gesture=null; hideLoupe(); const a=[...ptrs.values()];
     pinch={d:dist(a[0],a[1]),mx:(a[0].x+a[1].x)/2,my:(a[0].y+a[1].y)/2,k:S.cam.k,cx:S.cam.x,cy:S.cam.y}; refresh(); return; }
-  const [sx,sy]=rectXY(e), hit=hitVertex(sx,sy)||hitBend(sx,sy), isTouch=e.pointerType!=='mouse';
-  if(hit){ const orig = hit.kind==='bend' ? ((hit.pc.bend&&hit.pc.bend[hit.i])?hit.pc.bend[hit.i].slice():null) : hit.arr[hit.idx].slice();
+  const [sx,sy]=rectXY(e), hit=(S.mode==='template')?(hitCard(sx,sy)||hitTmpl(sx,sy)):(hitVertex(sx,sy)||hitBend(sx,sy)), isTouch=e.pointerType!=='mouse';
+  if(hit){ const orig = hit.kind==='bend' ? ((hit.pc.bend&&hit.pc.bend[hit.i])?hit.pc.bend[hit.i].slice():null)
+                      : hit.kind==='tmpl' ? S.tmpl.pts[hit.id].slice()
+                      : hit.arr[hit.idx].slice();
     gesture={kind:'drag',vtx:hit,isTouch,orig}; if(isTouch)showLoupe(sx,sy); }
   else if(isTouch){ const v=startPoint(s2i(sx,sy)); if(v){gesture={kind:'place',vtx:v,isTouch:true};refresh();showLoupe(sx,sy);} else gesture=null; }
   else { gesture={kind:'pan',start:{x:e.clientX,y:e.clientY},cx:S.cam.x,cy:S.cam.y,moved:false}; }   // 滑鼠：拖空白平移、點放開加點
@@ -589,6 +599,7 @@ stage.addEventListener('pointermove',e=>{
   if(gesture.kind==='place'||gesture.kind==='drag'){
     const v=gesture.vtx;
     if(v.kind==='bend'){ setBend(v.pc,v.i,sx,sy); }
+    else if(v.kind==='tmpl'){ S.tmpl.pts[v.id]=s2i(sx,sy); }
     else { v.arr[v.idx]=s2i(sx,sy); if(v.kind==='card')calibrate(); }
     refresh(); if(gesture.isTouch)showLoupe(sx,sy);
   }else if(gesture.kind==='pan'){
@@ -677,6 +688,7 @@ function paintHint(){
       : (!pc||!pc.pts.length) ? '單指沿輪廓點頂點（按住看放大鏡，放開才落點）'
       : (pc.pts.length<3) ? `已點 <b>${pc.pts.length}</b> 點 · 至少 3 點`
       : `已點 <b>${pc.pts.length}</b> 點 · 按「完成這一片」或點回起點`;}
+  else if(S.mode==='template')t=S.tmpl?'拖紅點貼合衣服輪廓（右邊拖、左邊自動對稱）· 尺寸即時算':'下面選款式，會丟一個版型上來貼合';
   else if(S.mode==='verify')t=S.verify.length<2?`點兩個已知距離的端點 <b>${S.verify.length}/2</b>`:'拖端點微調 · 對照下方實測值';
   h.innerHTML=t; h.style.opacity=t?1:0;
 }
@@ -709,14 +721,17 @@ function paintBar(){
       cta(`再點 ${3-pc.pts.length} 點完成`,'',null,true);
       cta('↩ 收回','sec',()=>{if(pc.pts.length){pc.pts.pop();refresh();}},!pc.pts.length);
     }
+  } else if(S.mode==='template'){
+    if(!S.tmpl){ Object.keys(GARMENTS).forEach((k,i)=>cta(GARMENTS[k].name, i===0?'ok':'sec', ()=>placeTmpl(k))); }
+    else { cta('↻ 重新置中','sec',()=>placeTmpl(S.tmpl.garment)); sbtn('✕ 移除款式','danger',()=>{S.tmpl=null;paintBar();paintHint();paintRes();render();}); }
   } else if(S.mode==='verify'){
     cta('清除核對','sec',()=>{S.verify=[];refresh();},!S.verify.length);
   }
   // 小工具列：模式切換(非定標時) + 單位 + 匯出 + 重來
   if(S.mode!=='card'){
     const seg=document.createElement('div');seg.className='segS';
-    seg.innerHTML=`<button class="${S.mode==='trace'?'on':''}" data-m="trace">描裁片</button><button class="${S.mode==='verify'?'on':''}" data-m="verify">核對</button>`;
-    U.appendChild(seg); seg.querySelectorAll('button').forEach(b=>b.onclick=()=>{S.mode=b.dataset.m;paintBar();paintHint();render();});
+    seg.innerHTML=`<button class="${S.mode==='trace'?'on':''}" data-m="trace">描裁片</button><button class="${S.mode==='template'?'on':''}" data-m="template">款式</button><button class="${S.mode==='verify'?'on':''}" data-m="verify">核對</button>`;
+    U.appendChild(seg); seg.querySelectorAll('button').forEach(b=>b.onclick=()=>{S.mode=b.dataset.m;paintBar();paintHint();paintRes();render();});
   }
   const useg=document.createElement('div');useg.className='segS';
   useg.innerHTML=`<button class="${S.unit==='cm'?'on':''}" data-u="cm">cm</button><button class="${S.unit==='mm'?'on':''}" data-u="mm">mm</button>`;
@@ -728,8 +743,15 @@ function paintBar(){
 function paintRes(){
   const res=$('#res'), wrap=$('#pieces'); wrap.innerHTML='';
   const list=S.pieces.filter(p=>p.pts.length);
-  res.classList.toggle('empty',!list.length||!S.H);
+  res.classList.toggle('empty', !S.H || (!list.length && !S.tmpl));
   if(!S.H)return;
+  if(S.tmpl){ const g=GARMENTS[S.tmpl.garment], m=measureTmpl();
+    const el=document.createElement('div');el.className='pc act';
+    el.innerHTML=`<div class="pc-h"><span class="pc-sw" style="background:#bf5a2f"></span><span class="pc-nm">${g.name} · 尺寸</span><span class="pc-sp"></span><button class="pc-del" data-tdel="1" aria-label="移除">✕</button></div>
+      <div class="pom">${m.map(x=>`<div><b>${fmtLen(x.mm)}</b><small>${x.key}</small></div>`).join('')}</div>`;
+    el.querySelector('[data-tdel]').onclick=()=>{S.tmpl=null;paintBar();paintHint();render();paintRes();};
+    wrap.appendChild(el);
+  }
   S.pieces.forEach((pc,i)=>{
     if(!pc.pts.length)return;
     const m=measure(pc), act=i===S.active;
@@ -780,7 +802,7 @@ async function shrink(file,max=1600,q=0.72){
 }
 async function useCanvasAsImage(c){    // 共用：一張 canvas → 進入量測流程
   S.img=await createImageBitmap(c); S.imgW=c.width; S.imgH=c.height;
-  S.card=[];S.H=null;S.pieces=[];S.active=0;S.verify=[];
+  S.card=[];S.H=null;S.pieces=[];S.active=0;S.verify=[];S.tmpl=null;
   $('#drop').style.display='none';
   fitView(); go(2);
 }
@@ -875,7 +897,7 @@ function exportJSON(){
   toast('量測 JSON 已匯出');
 }
 function reset(){ if(!confirm('清空目前所有定標與裁片？'))return;
-  S.img=null;S.card=[];S.H=null;S.pieces=[];S.verify=[];S.active=0;
+  S.img=null;S.card=[];S.H=null;S.pieces=[];S.verify=[];S.active=0;S.tmpl=null;
   $('#drop').style.display='flex'; go(1); }
 
 /* ════════════════════ 12 · 雜項 ════════════════════ */
@@ -915,9 +937,86 @@ function drawDemo(){
   ctx.font=`500 ${11*u}px ${getCSS('--sans')}`;ctx.fillStyle='#9c8f78';ctx.fillText('信用卡定標 · 描輪廓 · 真實尺寸湧現',0,-212*u);
 }
 
+/* ════════════════════ 15 · 款式模板（engine/domain：加款式＝加一筆表）════════════════════
+   每個款式 = {命名地標 points / 輪廓順序 outline / 標準量測 pom}。引擎不認識「T恤」，只吃表。
+   平鋪上衣左右對稱 → 只存「右半+中軸」地標，左半由「對稱軸鏡像」即時算出。 */
+const GARMENTS={
+  tee:{ name:'T 恤（短袖）',
+    points:[
+      {id:'neckCtr',     label:'領中', side:'center', x:0.50, y:0.16},
+      {id:'shoulderNeck',label:'肩頸', side:'right',  x:0.60, y:0.10},
+      {id:'shoulderEnd', label:'肩點', side:'right',  x:0.74, y:0.14},
+      {id:'sleeveOut',   label:'袖口外',side:'right', x:0.93, y:0.30},
+      {id:'sleeveIn',    label:'袖口內',side:'right', x:0.77, y:0.34},
+      {id:'underarm',    label:'腋下', side:'right',  x:0.71, y:0.38},
+      {id:'hemSide',     label:'擺側', side:'right',  x:0.70, y:0.95},
+      {id:'hemCtr',      label:'擺中', side:'center', x:0.50, y:0.97},
+    ],
+    outline:['neckCtr','shoulderNeck','shoulderEnd','sleeveOut','sleeveIn','underarm','hemSide','hemCtr'],
+    pom:[
+      {key:'肩寬', type:'mirror', p:'shoulderEnd'},
+      {key:'胸寬', type:'mirror', p:'underarm'},
+      {key:'下擺寬',type:'mirror', p:'hemSide'},
+      {key:'領寬', type:'mirror', p:'shoulderNeck'},
+      {key:'衣長', type:'span',   a:'shoulderNeck', b:'hemCtr'},
+      {key:'袖長', type:'span',   a:'shoulderEnd',  b:'sleeveOut'},
+      {key:'袖口', type:'span',   a:'sleeveOut',    b:'sleeveIn'},
+      {key:'領深', type:'drop',   p:'shoulderNeck'},
+    ],
+  },
+};
+const gPt=(g,id)=>g.points.find(p=>p.id===id);
+function tmplAxis(){ return [S.tmpl.pts.neckCtr, S.tmpl.pts.hemCtr]; }
+function mirrorPt(p,A,B){ const dx=B[0]-A[0],dy=B[1]-A[1],dd=dx*dx+dy*dy||1;
+  const t=((p[0]-A[0])*dx+(p[1]-A[1])*dy)/dd, cx=A[0]+t*dx, cy=A[1]+t*dy; return [2*cx-p[0],2*cy-p[1]]; }
+function placeTmpl(garment){
+  const g=GARMENTS[garment], bx=S.imgW*0.16,bw=S.imgW*0.68,by=S.imgH*0.07,bh=S.imgH*0.9, pts={};
+  g.points.forEach(p=>pts[p.id]=[bx+p.x*bw, by+p.y*bh]);
+  S.tmpl={garment,pts}; S.mode='template'; paintBar(); paintHint(); paintRes(); render();
+}
+function tmplOutline(){
+  const g=GARMENTS[S.tmpl.garment],P=S.tmpl.pts,[A,B]=tmplAxis();
+  const fwd=g.outline.map(id=>P[id]);
+  const back=g.outline.filter(id=>gPt(g,id).side==='right').reverse().map(id=>mirrorPt(P[id],A,B));
+  return fwd.concat(back);
+}
+function measureTmpl(){
+  if(!S.H||!S.tmpl)return null;
+  const g=GARMENTS[S.tmpl.garment],P=S.tmpl.pts,[A,B]=tmplAxis();
+  const mmId=id=>applyH(S.H,P[id][0],P[id][1]), mmP=p=>applyH(S.H,p[0],p[1]), D=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
+  return g.pom.map(def=>{ let a,b;
+    if(def.type==='mirror'){ a=mmP(P[def.p]); b=mmP(mirrorPt(P[def.p],A,B)); }
+    else if(def.type==='span'){ a=mmId(def.a); b=mmId(def.b); }
+    else { a=mmId('neckCtr'); const m=mirrorPt(P[def.p],A,B); b=mmP([(P[def.p][0]+m[0])/2,(P[def.p][1]+m[1])/2]); }
+    return {key:def.key, mm:D(a,b)};
+  });
+}
+function hitCard(sx,sy){ for(let i=0;i<S.card.length;i++){const[x,y]=i2s(S.card[i][0],S.card[i][1]);if(Math.hypot(x-sx,y-sy)<=HIT)return{kind:'card',arr:S.card,idx:i};} return null; }
+function hitTmpl(sx,sy){ if(!S.tmpl)return null;
+  for(const p of GARMENTS[S.tmpl.garment].points){ const ip=S.tmpl.pts[p.id],[x,y]=i2s(ip[0],ip[1]); if(Math.hypot(x-sx,y-sy)<=HIT)return{kind:'tmpl',id:p.id}; } return null; }
+function drawTmpl(){
+  if(!S.tmpl)return;
+  const g=GARMENTS[S.tmpl.garment],P=S.tmpl.pts,[A,B]=tmplAxis(),act=S.mode==='template', out=tmplOutline();
+  ctx.beginPath(); out.forEach((p,i)=>{const[x,y]=i2s(p[0],p[1]);i?ctx.lineTo(x,y):ctx.moveTo(x,y);}); ctx.closePath();
+  ctx.globalAlpha=act?.14:.06;ctx.fillStyle='#bf5a2f';ctx.fill();ctx.globalAlpha=1;
+  ctx.lineWidth=act?2.5:1.6;ctx.strokeStyle='#bf5a2f';ctx.stroke();
+  if(act){
+    const[ax,ay]=i2s(A[0],A[1]),[bx,by]=i2s(B[0],B[1]);
+    ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(bx,by);ctx.lineWidth=1.5;ctx.setLineDash([4,5]);ctx.strokeStyle='rgba(255,255,255,.55)';ctx.stroke();ctx.setLineDash([]);
+    g.points.filter(p=>p.side==='right').forEach(p=>{const m=mirrorPt(P[p.id],A,B),[x,y]=i2s(m[0],m[1]);ctx.beginPath();ctx.arc(x,y,4,0,7);ctx.fillStyle='rgba(255,255,255,.55)';ctx.fill();});
+    const mm=measureTmpl(), get=k=>mm.find(x=>x.key===k).mm;
+    const ua=P.underarm,uam=mirrorPt(ua,A,B),[u1x,u1y]=i2s(ua[0],ua[1]),[u2x,u2y]=i2s(uam[0],uam[1]); chip((u1x+u2x)/2,(u1y+u2y)/2,'胸 '+fmtLen(get('胸寬')),'rgba(20,17,13,.86)');
+    const[snx,sny]=i2s(P.shoulderNeck[0],P.shoulderNeck[1]),[hcx,hcy]=i2s(P.hemCtr[0],P.hemCtr[1]); chip((snx+hcx)/2,(sny+hcy)/2,'衣長 '+fmtLen(get('衣長')),'rgba(20,17,13,.86)');
+  }
+  g.points.forEach(p=>{const ip=P[p.id],[x,y]=i2s(ip[0],ip[1]);
+    ctx.beginPath();ctx.arc(x,y,act?6:4.5,0,7);ctx.fillStyle='#bf5a2f';ctx.fill();ctx.lineWidth=2;ctx.strokeStyle='#fff';ctx.stroke();
+    if(act)chip(x,y-15,p.label,'rgba(20,17,13,.72)');
+  });
+}
+
 /* ════════════════════ 14 · headless 測試鉤子 ════════════════════ */
 window.__app={
-  S, calibrate, measure, applyH, computeH, localScale, levelState, refresh, paintBar, paintRes,
+  S, calibrate, measure, applyH, computeH, localScale, levelState, refresh, paintBar, paintRes, placeTmpl, measureTmpl, mirrorPt, GARMENTS,
   // 合成已知案例驗湧現：卡 171.2×108px(=0.5mm/px)、100×100px... 方塊 → 100mm 方
   test(){
     S.imgW=800;S.imgH=600;
